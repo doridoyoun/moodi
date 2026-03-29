@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#faf5ff">
+    <title>Moodi</title>
+    <style>
+        :root {
+            --tint-a: #e8ecff;
+            --tint-b: #f5e8ff;
+            --tint-c: #ffe8f4;
+            --wave-deep: #9eb8ff;
+            --wave-mid: #c4b8ff;
+            --wave-light: #e8d4ff;
+            --wave-pink: #ffd6ea;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+            background: #dcd4e8;
+            font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100dvh;
+        }
+
+        #stage {
+            position: relative;
+            width: min(100vw, calc(100dvh * 9 / 16));
+            height: min(100dvh, calc(100vw * 16 / 9));
+            aspect-ratio: 9 / 16;
+            overflow: hidden;
+            isolation: isolate;
+        }
+
+        /* ── 하늘 / 안개 배경 ── */
+        .sky {
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(ellipse 120% 80% at 50% -10%, #fffefb 0%, transparent 55%),
+                radial-gradient(ellipse 90% 50% at 15% 25%, rgba(255, 232, 248, 0.9) 0%, transparent 50%),
+                radial-gradient(ellipse 70% 45% at 85% 18%, rgba(232, 240, 255, 0.85) 0%, transparent 48%),
+                radial-gradient(ellipse 60% 40% at 50% 40%, rgba(245, 230, 255, 0.5) 0%, transparent 45%),
+                linear-gradient(
+                    168deg,
+                    #fffaf8 0%,
+                    #fff4f8 18%,
+                    var(--tint-b) 42%,
+                    #f0f4ff 58%,
+                    var(--tint-a) 78%,
+                    #faf0ff 100%
+                );
+        }
+
+        .mist {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(48px);
+            pointer-events: none;
+            mix-blend-mode: screen;
+            opacity: 0.55;
+        }
+
+        .mist.m1 { width: 85%; height: 38%; left: -15%; top: 5%; background: radial-gradient(circle, rgba(255, 248, 255, 0.95) 0%, transparent 70%); }
+        .mist.m2 { width: 70%; height: 35%; right: -12%; top: 12%; background: radial-gradient(circle, rgba(240, 248, 255, 0.9) 0%, transparent 68%); }
+        .mist.m3 { width: 100%; height: 45%; left: 0; bottom: 28%; background: radial-gradient(ellipse, rgba(255, 236, 252, 0.45) 0%, transparent 65%); opacity: 0.4; }
+        .mist.m4 { width: 55%; height: 30%; left: 22%; top: 32%; background: radial-gradient(circle, rgba(255, 255, 255, 0.5) 0%, transparent 60%); filter: blur(64px); opacity: 0.35; }
+
+        /* ── 뒤쪽 젤리층 (SVG) ── */
+        .layer-back-svg {
+            position: absolute;
+            left: -8%;
+            width: 116%;
+            height: 100%;
+            bottom: -5%;
+            pointer-events: none;
+            z-index: 1;
+            opacity: 0.85;
+        }
+
+        .layer-back-svg svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* ── 메인 히어로 파도 ── */
+        .layer-hero {
+            position: absolute;
+            left: -12%;
+            width: 124%;
+            height: 92%;
+            bottom: -8%;
+            pointer-events: none;
+            z-index: 3;
+            animation: hero-drift 14s ease-in-out infinite alternate;
+        }
+
+        @keyframes hero-drift {
+            from { transform: translate3d(0, 0, 0) scale(1); }
+            to { transform: translate3d(-1.2%, 0.6%, 0) scale(1.01); }
+        }
+
+        .layer-hero svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+            filter: drop-shadow(0 28px 48px rgba(180, 170, 255, 0.25))
+                    drop-shadow(0 12px 32px rgba(255, 200, 230, 0.2));
+        }
+
+        /* ── 캐릭터 앵커 (파도 꼭대기 근처) ── */
+        .character-anchor {
+            position: absolute;
+            left: 50%;
+            top: 36%;
+            transform: translate3d(-50%, 0, 0);
+            z-index: 5;
+            width: min(16vmin, 72px);
+            height: min(18vmin, 80px);
+            pointer-events: none;
+            animation: char-float 9s ease-in-out infinite;
+            filter: drop-shadow(0 16px 28px rgba(255, 255, 255, 0.65))
+                    drop-shadow(0 8px 20px rgba(200, 210, 255, 0.35));
+        }
+
+        @keyframes char-float {
+            0%, 100% { transform: translate3d(-50%, 0, 0); }
+            50% { transform: translate3d(-50%, -5px, 0); }
+        }
+
+        .character-anchor svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* ── 전경 소프트 베일 (몽환) ── */
+        .veil {
+            position: absolute;
+            inset: 0;
+            z-index: 6;
+            pointer-events: none;
+            background: radial-gradient(ellipse 100% 55% at 50% 0%, transparent 40%, rgba(255, 252, 255, 0.08) 100%);
+            mix-blend-mode: soft-light;
+        }
+
+        /* ── UI: 거의 숨김 ── */
+        .headline {
+            position: absolute;
+            top: max(10px, env(safe-area-inset-top, 8px));
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 12;
+            width: 88%;
+            max-width: 280px;
+            text-align: center;
+            font-size: clamp(10px, 2.8vmin, 12px);
+            font-weight: 600;
+            line-height: 1.35;
+            color: rgba(72, 68, 95, 0.38);
+            letter-spacing: -0.02em;
+            pointer-events: none;
+            transition: opacity 0.5s ease, color 0.5s ease;
+        }
+
+        .headline:hover,
+        #stage:hover .headline {
+            color: rgba(72, 68, 95, 0.55);
+        }
+
+        .emoji-bar {
+            position: absolute;
+            bottom: max(8px, env(safe-area-inset-bottom, 6px));
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 12;
+            display: flex;
+            gap: clamp(8px, 2.5vmin, 16px);
+            justify-content: center;
+            align-items: center;
+            padding: 4px 8px;
+            opacity: 0.42;
+            transition: opacity 0.4s ease;
+        }
+
+        #stage:hover .emoji-bar,
+        .emoji-bar:focus-within {
+            opacity: 0.72;
+        }
+
+        .emoji-btn {
+            width: clamp(40px, 11vmin, 52px);
+            height: clamp(40px, 11vmin, 52px);
+            padding: 0;
+            font-size: clamp(20px, 5.5vmin, 26px);
+            line-height: 1;
+            border: none;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.35);
+            box-shadow: 0 4px 18px rgba(160, 150, 200, 0.12);
+            cursor: pointer;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }
+
+        .emoji-btn:active {
+            transform: scale(0.94);
+        }
+
+        .emoji-btn[aria-pressed="true"] {
+            background: rgba(255, 255, 255, 0.55);
+        }
+    </style>
+</head>
+<body>
+    <div id="stage">
+        <div class="sky" aria-hidden="true"></div>
+        <div class="mist m1" aria-hidden="true"></div>
+        <div class="mist m2" aria-hidden="true"></div>
+        <div class="mist m3" aria-hidden="true"></div>
+        <div class="mist m4" aria-hidden="true"></div>
+
+        <!-- 뒤 레이어: 흐릿한 젤리 덩어리들 -->
+        <div class="layer-back-svg" aria-hidden="true">
+            <svg viewBox="0 0 400 700" preserveAspectRatio="xMidYMax meet" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <filter id="blurFar" x="-30%" y="-30%" width="160%" height="160%">
+                        <feGaussianBlur stdDeviation="18" result="b"/>
+                        <feMerge>
+                            <feMergeNode in="b"/>
+                            <feMergeNode in="SourceGraphic"/>
+                        </feMerge>
+                    </filter>
+                    <linearGradient id="backBlob1" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#f0e8ff" stop-opacity="0.95"/>
+                        <stop offset="50%" stop-color="#e4ecff" stop-opacity="0.75"/>
+                        <stop offset="100%" stop-color="#dde8ff" stop-opacity="0.5"/>
+                    </linearGradient>
+                    <linearGradient id="backBlob2" x1="100%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stop-color="#ffeef8" stop-opacity="0.85"/>
+                        <stop offset="100%" stop-color="#e8e8ff" stop-opacity="0.45"/>
+                    </linearGradient>
+                    <radialGradient id="backGlow" cx="50%" cy="40%" r="70%">
+                        <stop offset="0%" stop-color="#ffffff" stop-opacity="0.55"/>
+                        <stop offset="100%" stop-color="#e8e4ff" stop-opacity="0"/>
+                    </radialGradient>
+                </defs>
+                <g filter="url(#blurFar)" opacity="0.72">
+                    <path fill="url(#backBlob1)" d="M-40 520 C20 480 80 440 140 400 C200 365 260 350 320 360 C380 372 420 420 440 480 L460 720 L-60 720 Z"/>
+                    <path fill="url(#backBlob2)" d="M-20 560 C60 520 120 500 200 490 C280 482 360 500 420 540 C450 565 470 600 480 640 L500 720 L-40 720 Z" opacity="0.65"/>
+                    <ellipse cx="280" cy="380" rx="120" ry="70" fill="url(#backGlow)" opacity="0.5"/>
+                </g>
+                <g filter="url(#blurFar)" opacity="0.5" transform="translate(-30, 40)">
+                    <path fill="#eef2ff" d="M-60 580 C40 540 100 520 180 515 C260 510 340 530 400 570 L420 720 L-80 720 Z"/>
+                </g>
+            </svg>
+        </div>
+
+        <!-- 메인 히어로 젤리 파도: 조형 path (사인파 아님) -->
+        <div class="layer-hero" aria-hidden="true">
+            <svg viewBox="0 0 400 700" preserveAspectRatio="xMidYMax meet" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <linearGradient id="jellyBody" x1="50%" y1="0%" x2="50%" y2="100%">
+                        <stop id="jellyStop0" offset="0%" stop-color="#ffd6ea" stop-opacity="0.88"/>
+                        <stop id="jellyStop1" offset="28%" stop-color="#e8d4ff" stop-opacity="0.82"/>
+                        <stop id="jellyStop2" offset="52%" stop-color="#c4b8ff" stop-opacity="0.78"/>
+                        <stop id="jellyStop3" offset="82%" stop-color="#9eb8ff" stop-opacity="0.72"/>
+                        <stop id="jellyStop4" offset="100%" stop-color="#7a9cff" stop-opacity="0.65"/>
+                    </linearGradient>
+                    <radialGradient id="jellyInner" cx="42%" cy="32%" r="55%">
+                        <stop offset="0%" stop-color="#ffffff" stop-opacity="0.45"/>
+                        <stop offset="35%" stop-color="#f0e8ff" stop-opacity="0.22"/>
+                        <stop offset="70%" stop-color="#c8d4ff" stop-opacity="0.12"/>
+                        <stop offset="100%" stop-color="#a8b8ff" stop-opacity="0"/>
+                    </radialGradient>
+                    <radialGradient id="jellyDepth" cx="65%" cy="75%" r="50%">
+                        <stop offset="0%" stop-color="#8898e8" stop-opacity="0.28"/>
+                        <stop offset="100%" stop-color="#a8b8ff" stop-opacity="0"/>
+                    </radialGradient>
+                    <filter id="innerGlow" x="-20%" y="-20%" width="140%" height="140%">
+                        <feGaussianBlur in="SourceGraphic" stdDeviation="1.2" result="s"/>
+                        <feMerge>
+                            <feMergeNode in="s"/>
+                            <feMergeNode in="SourceGraphic"/>
+                        </feMerge>
+                    </filter>
+                    <filter id="rimBloom" x="-50%" y="-50%" width="200%" height="200%">
+                        <feGaussianBlur in="SourceAlpha" stdDeviation="10" result="b"/>
+                        <feFlood flood-color="#ffffff" flood-opacity="0.35" result="f"/>
+                        <feComposite in="f" in2="b" operator="in" result="g"/>
+                        <feMerge>
+                            <feMergeNode in="g"/>
+                            <feMergeNode in="SourceGraphic"/>
+                        </feMerge>
+                    </filter>
+                </defs>
+
+                <!-- 부드러운 바닥 확산 -->
+                <ellipse cx="200" cy="668" rx="220" ry="48" fill="url(#jellyDepth)" opacity="0.4" filter="url(#innerGlow)"/>
+
+                <!-- 메인 젤리 덩어리: 두꺼운 C컬 크레스트 -->
+                <path id="hero-silhouette" fill="url(#jellyBody)" d="
+                    M -30 720
+                    L -30 520
+                    C 35 505 95 465 145 415
+                    C 175 382 205 348 238 318
+                    C 268 292 298 278 322 285
+                    C 348 293 362 318 358 348
+                    C 352 388 318 428 275 458
+                    C 228 492 168 512 105 525
+                    C 55 535 340 548 395 565
+                    C 430 575 450 600 450 640
+                    L 450 720
+                    Z
+                "/>
+
+                <!-- 내부 빛 (반투명) -->
+                <path fill="url(#jellyInner)" d="
+                    M -20 720
+                    L -20 535
+                    C 40 515 100 475 150 430
+                    C 195 390 230 350 265 318
+                    C 290 295 315 285 332 292
+                    C 352 302 358 328 348 358
+                    C 332 402 288 438 235 465
+                    C 175 498 95 518 380 540
+                    L 430 720
+                    Z
+                " style="mix-blend-mode: soft-light;"/>
+
+                <!-- 크레스트 하이라이트 림 (면으로 형태 유도) -->
+                <path fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" filter="url(#rimBloom)" d="
+                    M 142 418
+                    C 178 375 218 335 258 305
+                    C 285 285 310 278 328 284
+                    C 348 292 358 312 354 338
+                "/>
+                <path fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1.4" stroke-linecap="round" d="
+                    M 155 430
+                    C 195 385 235 348 272 322
+                    C 295 305 315 298 330 304
+                "/>
+
+                <!-- 작은 버블 -->
+                <circle cx="118" cy="520" r="9" fill="rgba(255,255,255,0.2)" stroke="rgba(255,255,255,0.25)" stroke-width="0.6"/>
+                <circle cx="312" cy="560" r="6" fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.2)" stroke-width="0.5"/>
+                <circle cx="88" cy="580" r="4.5" fill="rgba(255,255,255,0.18)"/>
+                <circle cx="340" cy="505" r="5" fill="rgba(255,255,255,0.12)"/>
+            </svg>
+        </div>
+
+        <!-- 캐릭터 + 배 -->
+        <div class="character-anchor" id="characterAnchor">
+            <svg viewBox="0 0 200 210" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <defs>
+                    <radialGradient id="charGlow" cx="50%" cy="85%" r="55%">
+                        <stop offset="0%" stop-color="#ffffff" stop-opacity="0.9"/>
+                        <stop offset="45%" stop-color="#f5f0ff" stop-opacity="0.35"/>
+                        <stop offset="100%" stop-color="#e8e4ff" stop-opacity="0"/>
+                    </radialGradient>
+                    <filter id="charSoft" x="-25%" y="-25%" width="150%" height="150%">
+                        <feGaussianBlur stdDeviation="0.4" result="b"/>
+                        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                    </filter>
+                </defs>
+                <ellipse cx="100" cy="188" rx="56" ry="14" fill="url(#charGlow)" opacity="0.85"/>
+                <path filter="url(#charSoft)" fill="#fffffe" stroke="#f4f0fa" stroke-width="0.5" d="
+                    M 48 128
+                    C 48 108 58 96 78 92
+                    C 98 88 122 88 142 92
+                    C 162 96 172 108 172 128
+                    C 174 150 162 172 100 180
+                    C 38 172 46 150 48 128
+                    Z
+                "/>
+                <path fill="none" stroke="rgba(255,255,255,0.75)" stroke-width="1" stroke-linecap="round" d="M 62 102 C 78 96 122 96 138 102"/>
+                <ellipse cx="100" cy="108" rx="20" ry="19" fill="#fffffe" stroke="#f2eef8" stroke-width="0.4"/>
+                <ellipse cx="89" cy="110" rx="4.5" ry="2.8" fill="#ffb8d0" opacity="0.2"/>
+                <ellipse cx="111" cy="110" rx="4.5" ry="2.8" fill="#ffb8d0" opacity="0.2"/>
+                <g id="character-face" stroke-linecap="round">
+                    <g data-face="happy" opacity="1" fill="#2a2638">
+                        <circle cx="94.5" cy="116" r="1"/>
+                        <circle cx="105.5" cy="116" r="1"/>
+                        <path d="M 98 120 Q 100 121 102 120" fill="none" stroke="#2a2638" stroke-width="0.55"/>
+                    </g>
+                    <g data-face="flutter" opacity="0" fill="#2a2638">
+                        <circle cx="94.5" cy="116" r="1"/>
+                        <circle cx="105.5" cy="116" r="1"/>
+                        <path d="M 98 120 Q 100 121 102 120" fill="none" stroke="#2a2638" stroke-width="0.55"/>
+                    </g>
+                    <g data-face="gloomy" opacity="0" fill="#2a2638">
+                        <circle cx="94.5" cy="116" r="1"/>
+                        <circle cx="105.5" cy="116" r="1"/>
+                        <path d="M 98.5 121 Q 100 120 101.5 121" fill="none" stroke="#2a2638" stroke-width="0.5"/>
+                    </g>
+                    <g data-face="annoyed" opacity="0" fill="none" stroke="#2a2638" stroke-width="0.5">
+                        <path d="M 92.5 114.5 L 94.8 115.5"/>
+                        <path d="M 107.5 114.5 L 105.2 115.5"/>
+                        <path d="M 98.2 121 L 101.8 121"/>
+                    </g>
+                </g>
+            </svg>
+        </div>
+
+        <div class="veil" aria-hidden="true"></div>
+
+        <p class="headline" id="headline">오늘 무디님의 바다에는 아직 감정이 담기길 기다리고 있어요</p>
+        <div class="emoji-bar" role="group" aria-label="감정">
+            <button type="button" class="emoji-btn" data-emotion="happy" aria-pressed="false">😊</button>
+            <button type="button" class="emoji-btn" data-emotion="flutter" aria-pressed="false">💛</button>
+            <button type="button" class="emoji-btn" data-emotion="gloomy" aria-pressed="false">😢</button>
+            <button type="button" class="emoji-btn" data-emotion="annoyed" aria-pressed="false">😤</button>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            const KEYS = ['happy', 'flutter', 'gloomy', 'annoyed'];
+            const STORAGE_RECENT = 'moodi-recent-v4';
+            const STORAGE_DAILY = 'moodi-daily-v4';
+            const LABEL = { happy: '행복', flutter: '설렘', gloomy: '울적', annoyed: '짜증' };
+
+            const TINTS = {
+                happy: { a: '#f5ecff', b: '#ffe8f4', c: '#fff0f5', deep: '#a8b8ff', mid: '#d4b8ff', light: '#f0d0ff', pink: '#ffd0e8' },
+                flutter: { a: '#fff8ec', b: '#ffeef8', c: '#fffaf0', deep: '#9eb0ff', mid: '#d8c8ff', light: '#ffe8c8', pink: '#ffe0d0' },
+                gloomy: { a: '#e8f4ff', b: '#e8ecff', c: '#f0f8ff', deep: '#7a9ee8', mid: '#b0c8ff', light: '#d8e8ff', pink: '#e0e8ff' },
+                annoyed: { a: '#f5ecff', b: '#f0e8ff', c: '#faf0ff', deep: '#9888e0', mid: '#c8b8f0', light: '#e8d8ff', pink: '#ecd8f5' }
+            };
+
+            const stage = document.getElementById('stage');
+            const headlineEl = document.getElementById('headline');
+            const emojiBtns = document.querySelectorAll('.emoji-btn');
+
+            let recentMoods = [];
+
+            function todayStart() {
+                const d = new Date();
+                d.setHours(0, 0, 0, 0);
+                return d.getTime();
+            }
+
+            function loadDaily() {
+                try {
+                    const a = JSON.parse(localStorage.getItem(STORAGE_DAILY) || '[]');
+                    return Array.isArray(a) ? a : [];
+                } catch { return []; }
+            }
+
+            function saveDaily(arr) {
+                localStorage.setItem(STORAGE_DAILY, JSON.stringify(arr));
+            }
+
+            function getTodayEvents() {
+                const t0 = todayStart();
+                return loadDaily().filter((e) => e && typeof e.ts === 'number' && e.ts >= t0 && KEYS.includes(e.key));
+            }
+
+            function loadRecent() {
+                try {
+                    const raw = JSON.parse(localStorage.getItem(STORAGE_RECENT) || '[]');
+                    recentMoods = Array.isArray(raw) ? raw.filter((k) => KEYS.includes(k)).slice(-10) : [];
+                } catch { recentMoods = []; }
+            }
+
+            function saveRecent() {
+                localStorage.setItem(STORAGE_RECENT, JSON.stringify(recentMoods));
+            }
+
+            function weightedDominant() {
+                if (!recentMoods.length) return 'happy';
+                const w = { happy: 0, flutter: 0, gloomy: 0, annoyed: 0 };
+                const n = recentMoods.length;
+                for (let i = 0; i < n; i++) {
+                    const k = recentMoods[i];
+                    if (w[k] !== undefined) w[k] += i >= n - 3 ? 2 : 1;
+                }
+                let best = 'happy';
+                let mx = -1;
+                for (const k of KEYS) {
+                    if (w[k] > mx) { mx = w[k]; best = k; }
+                }
+                return best;
+            }
+
+            function applyTints(key) {
+                const t = TINTS[key] || TINTS.happy;
+                stage.style.setProperty('--tint-a', t.a);
+                stage.style.setProperty('--tint-b', t.b);
+                stage.style.setProperty('--tint-c', t.c);
+                stage.style.setProperty('--wave-deep', t.deep);
+                stage.style.setProperty('--wave-mid', t.mid);
+                stage.style.setProperty('--wave-light', t.light);
+                stage.style.setProperty('--wave-pink', t.pink);
+                const s0 = document.getElementById('jellyStop0');
+                const s1 = document.getElementById('jellyStop1');
+                const s2 = document.getElementById('jellyStop2');
+                const s3 = document.getElementById('jellyStop3');
+                const s4 = document.getElementById('jellyStop4');
+                if (s0 && s1 && s2 && s3 && s4) {
+                    s0.setAttribute('stop-color', t.pink);
+                    s1.setAttribute('stop-color', t.light);
+                    s2.setAttribute('stop-color', t.mid);
+                    s3.setAttribute('stop-color', t.deep);
+                    s4.setAttribute('stop-color', t.deep);
+                }
+            }
+
+            function updateHeadline() {
+                const ev = getTodayEvents();
+                if (!ev.length) {
+                    headlineEl.textContent = '오늘 무디님의 바다에는 아직 감정이 담기길 기다리고 있어요';
+                    return;
+                }
+                const c = { happy: 0, flutter: 0, gloomy: 0, annoyed: 0 };
+                for (const e of ev) {
+                    if (c[e.key] !== undefined) c[e.key]++;
+                }
+                let dom = 'happy';
+                let mx = -1;
+                for (const k of KEYS) {
+                    if (c[k] > mx) { mx = c[k]; dom = k; }
+                }
+                headlineEl.textContent = `오늘 무디님의 바다에는 ${LABEL[dom]}이 가장 많이 쌓였어요`;
+            }
+
+            function setFace(key) {
+                document.querySelectorAll('#character-face > [data-face]').forEach((g) => {
+                    g.setAttribute('opacity', g.getAttribute('data-face') === key ? '1' : '0');
+                });
+            }
+
+            function refreshVisuals() {
+                applyTints(weightedDominant());
+            }
+
+            function onEmoji(key) {
+                if (!KEYS.includes(key)) return;
+                const t0 = todayStart();
+                const kept = loadDaily().filter((e) => e && e.ts >= t0);
+                kept.push({ ts: Date.now(), key });
+                saveDaily(kept);
+                recentMoods.push(key);
+                if (recentMoods.length > 10) recentMoods.shift();
+                saveRecent();
+                updateHeadline();
+                setFace(key);
+                refreshVisuals();
+                emojiBtns.forEach((b) =>
+                    b.setAttribute('aria-pressed', b.getAttribute('data-emotion') === key)
+                );
+            }
+
+            function init() {
+                loadRecent();
+                updateHeadline();
+                refreshVisuals();
+                const ev = getTodayEvents();
+                if (ev.length) {
+                    const last = ev[ev.length - 1].key;
+                    setFace(last);
+                    emojiBtns.forEach((b) =>
+                        b.setAttribute('aria-pressed', b.getAttribute('data-emotion') === last)
+                    );
+                } else {
+                    setFace('happy');
+                }
+                emojiBtns.forEach((btn) => {
+                    btn.addEventListener('click', () => onEmoji(btn.getAttribute('data-emotion')));
+                });
+            }
+
+            init();
+        })();
+    </script>
+</body>
+</html>
