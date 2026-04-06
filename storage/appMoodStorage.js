@@ -7,7 +7,7 @@ const UNIFIED_KEY = 'moodi_unified_state_v1';
 const EMPTY_FOUR = [null, null, null, null];
 
 /**
- * @returns {Promise<{ timelineByDate: object, albumItems: object[], fourSlotIds: (string|null)[] }>}
+ * @returns {Promise<{ timelineByDate: object, albumItems: object[], fourSlotIds: (string|null)[], moodiDaySummary: string }>}
  */
 export async function loadMoodPersistedState() {
   try {
@@ -19,6 +19,7 @@ export async function loadMoodPersistedState() {
         albumItems: Array.isArray(p.albumItems) ? p.albumItems : [],
         fourSlotIds:
           Array.isArray(p.fourSlotIds) && p.fourSlotIds.length === 4 ? p.fourSlotIds : [...EMPTY_FOUR],
+        moodiDaySummary: typeof p.moodiDaySummary === 'string' ? p.moodiDaySummary : '',
       };
     }
   } catch {
@@ -42,11 +43,12 @@ export async function loadMoodPersistedState() {
     timelineByDate,
     albumItems: migratedAlbum,
     fourSlotIds: gallery.fourSlotIds?.length === 4 ? gallery.fourSlotIds : [...EMPTY_FOUR],
+    moodiDaySummary: '',
   };
 }
 
 /**
- * @param {{ timelineByDate: object, albumItems: object[], fourSlotIds: (string|null)[] }} state
+ * @param {{ timelineByDate: object, albumItems: object[], fourSlotIds: (string|null)[], moodiDaySummary: string }} state
  */
 export async function saveMoodPersistedState(state) {
   await AsyncStorage.setItem(UNIFIED_KEY, JSON.stringify(state));

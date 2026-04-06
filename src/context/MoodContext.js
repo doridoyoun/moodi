@@ -82,6 +82,7 @@ export function MoodProvider({ children }) {
   const [timelineByDate, setTimelineByDate] = useState({});
   const [albumItems, setAlbumItems] = useState([]);
   const [fourSlotIds, setFourSlotIds] = useState([null, null, null, null]);
+  const [moodiDaySummary, setMoodiDaySummary] = useState('');
   const [selectedDate, setSelectedDate] = useState(() => toDateKey(new Date()));
   const hydrated = useRef(false);
 
@@ -92,6 +93,7 @@ export function MoodProvider({ children }) {
       setTimelineByDate(data.timelineByDate);
       setAlbumItems(data.albumItems);
       setFourSlotIds(data.fourSlotIds);
+      setMoodiDaySummary(data.moodiDaySummary ?? '');
       hydrated.current = true;
     });
     return () => {
@@ -102,10 +104,12 @@ export function MoodProvider({ children }) {
   useEffect(() => {
     if (!hydrated.current) return;
     const t = setTimeout(() => {
-      saveMoodPersistedState({ timelineByDate, albumItems, fourSlotIds }).catch(() => {});
+      saveMoodPersistedState({ timelineByDate, albumItems, fourSlotIds, moodiDaySummary }).catch(
+        () => {},
+      );
     }, 400);
     return () => clearTimeout(t);
-  }, [timelineByDate, albumItems, fourSlotIds]);
+  }, [timelineByDate, albumItems, fourSlotIds, moodiDaySummary]);
 
   const shiftSelectedDateByDays = useCallback((delta) => {
     setSelectedDate((prev) => addDaysToDateKey(prev, delta));
@@ -202,6 +206,8 @@ export function MoodProvider({ children }) {
       fourSlotIds,
       setFourSlotAt,
       clearAllFourSlots,
+      moodiDaySummary,
+      setMoodiDaySummary,
       selectedDate,
       setSelectedDate,
       shiftSelectedDateByDays,
@@ -216,6 +222,8 @@ export function MoodProvider({ children }) {
       fourSlotIds,
       setFourSlotAt,
       clearAllFourSlots,
+      moodiDaySummary,
+      setMoodiDaySummary,
       selectedDate,
       shiftSelectedDateByDays,
       applyEmotionForCurrentHour,

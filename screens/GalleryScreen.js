@@ -39,17 +39,7 @@ function formatTimeShort(iso) {
   return `${h}:${m}`;
 }
 
-function formatExportDateLabel() {
-  return new Date().toLocaleDateString('ko-KR', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    weekday: 'long',
-  });
-}
-
-/** 네컷 저장 이미지 하단 — 한 줄로 읽기 쉽게 */
-function formatMoodiShareFooterDate() {
+function formatMoodiCanvasDate() {
   return new Date().toLocaleDateString('ko-KR', {
     year: 'numeric',
     month: 'numeric',
@@ -65,188 +55,180 @@ const modalEmotionIcons = {
   annoyed: Flame,
 };
 
-const moodiShareStyles = StyleSheet.create({
-  card: {
+const moodiCanvasStyles = StyleSheet.create({
+  canvas: {
     width: 340,
-    backgroundColor: '#faf9f7',
-    borderRadius: 20,
-    paddingTop: 22,
+    alignSelf: 'center',
+    backgroundColor: notebook.bg,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: notebook.gridLine,
+    paddingTop: 16,
     paddingBottom: 18,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     alignItems: 'center',
   },
-  title: {
+  canvasTitle: {
     fontSize: 15,
     fontWeight: '700',
     color: notebook.ink,
-    letterSpacing: 0.4,
-    marginBottom: 14,
+    textAlign: 'center',
+    letterSpacing: 0.15,
+    marginBottom: 10,
   },
-  grid: {
+  gridWrap: {
     width: '100%',
-    gap: 8,
+    gap: 5,
+    marginBottom: 2,
   },
-  row: {
+  gridRow: {
     flexDirection: 'row',
-    gap: 8,
-    justifyContent: 'space-between',
+    gap: 5,
+    width: '100%',
   },
-  cell: {
+  slotOuter: {
     flex: 1,
-    maxWidth: '50%',
+    minWidth: 0,
   },
-  photoFr: {
+  slotFrame: {
     width: '100%',
     aspectRatio: 1,
-    borderRadius: 12,
+    borderRadius: 8,
     borderWidth: 2,
     overflow: 'hidden',
     backgroundColor: '#fff',
   },
-  photo: {
+  slotImg: {
     width: '100%',
     height: '100%',
   },
-  photoEmpty: {
+  slotEmpty: {
     width: '100%',
     aspectRatio: 1,
-    borderRadius: 12,
-    backgroundColor: '#eceae6',
+    borderRadius: 8,
+    backgroundColor: '#f4f6f8',
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#e0ddd8',
+    borderColor: '#e8ecf0',
   },
-  captionCol: {
-    marginTop: 5,
-    paddingHorizontal: 2,
-    gap: 2,
-  },
-  memoLine: {
-    fontSize: 10,
-    fontWeight: '600',
-    lineHeight: 13,
-  },
-  memoPlaceholder: {
-    fontSize: 10,
-    lineHeight: 13,
-  },
-  timeLine: {
-    fontSize: 9,
-    fontWeight: '600',
-    color: notebook.inkMuted,
-    fontVariant: ['tabular-nums'],
-  },
-  timeMuted: {
-    fontSize: 9,
-    fontWeight: '600',
+  slotPlus: {
+    fontSize: 26,
     color: notebook.inkLight,
+    fontWeight: '300',
   },
-  footerDate: {
-    marginTop: 14,
-    fontSize: 11,
-    fontWeight: '600',
-    color: notebook.inkMuted,
-    letterSpacing: 0.2,
-  },
-  footerBrand: {
-    marginTop: 4,
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1,
-    color: notebook.inkLight,
-    opacity: 0.75,
-  },
-});
-
-function MoodiShareExportLayout({ fourSlotIds, resolveItem }) {
-  const slots = fourSlotIds.map((id) => (id ? resolveItem(id) : null));
-  return (
-    <View style={moodiShareStyles.card}>
-      <Text style={moodiShareStyles.title}>{"Today's Moodi"}</Text>
-      <View style={moodiShareStyles.grid}>
-        <View style={moodiShareStyles.row}>
-          <MoodiShareCell item={slots[0]} />
-          <MoodiShareCell item={slots[1]} />
-        </View>
-        <View style={moodiShareStyles.row}>
-          <MoodiShareCell item={slots[2]} />
-          <MoodiShareCell item={slots[3]} />
-        </View>
-      </View>
-      <Text style={moodiShareStyles.footerDate}>{formatMoodiShareFooterDate()}</Text>
-      <Text style={moodiShareStyles.footerBrand}>Moodi</Text>
-    </View>
-  );
-}
-
-function MoodiShareCell({ item }) {
-  if (!item) {
-    return (
-      <View style={moodiShareStyles.cell}>
-        <View style={moodiShareStyles.photoEmpty} />
-        <View style={moodiShareStyles.captionCol}>
-          <Text style={moodiShareStyles.memoPlaceholder} numberOfLines={1}>
-            {' '}
-          </Text>
-          <Text style={moodiShareStyles.timeMuted}>–</Text>
-        </View>
-      </View>
-    );
-  }
-  const eid = item.emotionId || 'happy';
-  const pal = moodPalette[eid] ?? moodPalette.happy;
-  const memo = (item.memo || '').trim();
-  return (
-    <View style={moodiShareStyles.cell}>
-      <View style={[moodiShareStyles.photoFr, { borderColor: pal.border }]}>
-        <Image source={{ uri: item.imageUri }} style={moodiShareStyles.photo} resizeMode="cover" />
-      </View>
-      <View style={moodiShareStyles.captionCol}>
-        <Text style={[moodiShareStyles.memoLine, { color: pal.ink }]} numberOfLines={1}>
-          {memo || ' '}
-        </Text>
-        <Text style={moodiShareStyles.timeLine}>{formatTimeShort(item.timestamp)}</Text>
-      </View>
-    </View>
-  );
-}
-
-function MemoTimeCaption({ memo, timestamp, memoColor, timeColor }) {
-  const line = (memo || '').trim();
-  const time = formatTimeShort(timestamp);
-  return (
-    <View style={memoTimeStyles.row}>
-      <Text style={[memoTimeStyles.memo, { color: memoColor }]} numberOfLines={2}>
-        {line || '\u00a0'}
-      </Text>
-      <Text style={[memoTimeStyles.time, { color: timeColor }]}>{time}</Text>
-    </View>
-  );
-}
-
-const memoTimeStyles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 8,
+  summaryBlock: {
     width: '100%',
-    marginTop: 6,
+    minHeight: 40,
+    marginTop: 10,
+    marginBottom: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    justifyContent: 'center',
   },
-  memo: {
-    flex: 1,
+  summaryInput: {
+    fontSize: 14,
+    fontWeight: '500',
+    fontStyle: 'italic',
+    color: '#5a6570',
+    textAlign: 'center',
+    lineHeight: 20,
+    minHeight: 40,
+    paddingVertical: 4,
+  },
+  summaryTextExport: {
+    fontSize: 14,
+    fontWeight: '500',
+    fontStyle: 'italic',
+    color: '#5a6570',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  footerMeta: {
+    width: '100%',
+    alignItems: 'center',
+    gap: 4,
+    paddingTop: 2,
+  },
+  canvasDate: {
     fontSize: 10,
     fontWeight: '500',
-    lineHeight: 14,
+    color: notebook.inkLight,
+    letterSpacing: 0.2,
   },
-  time: {
-    fontSize: 10,
+  canvasBrand: {
+    fontSize: 8,
     fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-    flexShrink: 0,
+    letterSpacing: 0.9,
+    color: notebook.inkLight,
+    opacity: 0.65,
   },
 });
 
-/** Archive 폴라로이드 전용 — Four-Cut은 MemoTimeCaption 유지 */
+function MoodiSlotPhoto({ item, onPress }) {
+  const eid = item?.emotionId || 'happy';
+  const pal = moodPalette[eid] ?? moodPalette.happy;
+  const inner = item ? (
+    <View style={[moodiCanvasStyles.slotFrame, { borderColor: pal.border }]}>
+      <Image source={{ uri: item.imageUri }} style={moodiCanvasStyles.slotImg} resizeMode="cover" />
+    </View>
+  ) : (
+    <View style={moodiCanvasStyles.slotEmpty}>
+      <Text style={moodiCanvasStyles.slotPlus}>＋</Text>
+    </View>
+  );
+
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [moodiCanvasStyles.slotOuter, pressed && { opacity: 0.92 }]}
+      >
+        {inner}
+      </Pressable>
+    );
+  }
+  return <View style={moodiCanvasStyles.slotOuter}>{inner}</View>;
+}
+
+function TodaysMoodiCanvas({ slots, summaryText, onSummaryChange, isExport, onSlotPress }) {
+  return (
+    <View style={moodiCanvasStyles.canvas} collapsable={false}>
+      <Text style={moodiCanvasStyles.canvasTitle}>{"Today's Moodi"}</Text>
+      <View style={moodiCanvasStyles.gridWrap}>
+        <View style={moodiCanvasStyles.gridRow}>
+          <MoodiSlotPhoto item={slots[0]} onPress={onSlotPress ? () => onSlotPress(0) : undefined} />
+          <MoodiSlotPhoto item={slots[1]} onPress={onSlotPress ? () => onSlotPress(1) : undefined} />
+        </View>
+        <View style={moodiCanvasStyles.gridRow}>
+          <MoodiSlotPhoto item={slots[2]} onPress={onSlotPress ? () => onSlotPress(2) : undefined} />
+          <MoodiSlotPhoto item={slots[3]} onPress={onSlotPress ? () => onSlotPress(3) : undefined} />
+        </View>
+      </View>
+      <View style={moodiCanvasStyles.summaryBlock}>
+        {isExport ? (
+          <Text style={moodiCanvasStyles.summaryTextExport}>{summaryText.trim() || ' '}</Text>
+        ) : (
+          <TextInput
+            value={summaryText}
+            onChangeText={onSummaryChange}
+            placeholder="오늘 하루를 한 줄로 적어 보세요"
+            placeholderTextColor="rgba(90, 101, 112, 0.45)"
+            multiline
+            maxLength={120}
+            style={moodiCanvasStyles.summaryInput}
+          />
+        )}
+      </View>
+      <View style={moodiCanvasStyles.footerMeta}>
+        <Text style={moodiCanvasStyles.canvasDate}>{formatMoodiCanvasDate()}</Text>
+        <Text style={moodiCanvasStyles.canvasBrand}>Moodi</Text>
+      </View>
+    </View>
+  );
+}
+
+/** Archive 폴라로이드 전용 */
 function ArchiveMemoTimeCaption({ memo, timestamp, memoColor, timeColor }) {
   const line = (memo || '').trim();
   const time = formatTimeShort(timestamp);
@@ -315,6 +297,8 @@ export default function GalleryScreen() {
     fourSlotIds,
     setFourSlotAt,
     clearAllFourSlots,
+    moodiDaySummary,
+    setMoodiDaySummary,
     addAlbumItem,
     updateAlbumItem,
     deleteAlbumItem,
@@ -506,6 +490,7 @@ export default function GalleryScreen() {
         style={styles.scroll}
         contentContainerStyle={styles.pagePad}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         <View style={styles.titleRow}>
           <Text style={styles.emoji}>📷</Text>
@@ -521,6 +506,15 @@ export default function GalleryScreen() {
         </View>
 
         <View style={styles.fourCutCard}>
+          <View style={styles.moodiCaptureOuter}>
+            <TodaysMoodiCanvas
+              slots={fourSlotIds.map((id) => (id ? resolveItem(id) : null))}
+              summaryText={moodiDaySummary}
+              onSummaryChange={setMoodiDaySummary}
+              isExport={false}
+              onSlotPress={openSlotPicker}
+            />
+          </View>
           <View style={styles.fourCutTitleRow}>
             <Pressable
               onPress={confirmClearAllFourSlots}
@@ -546,37 +540,6 @@ export default function GalleryScreen() {
               <Download size={20} color={notebook.inkMuted} strokeWidth={2} />
             </Pressable>
           </View>
-          <View style={styles.moodiCaptureOuter}>
-            <View style={styles.moodiExportCanvas}>
-              <Text style={styles.moodiExportTitle}>{"Today's Moodi"}</Text>
-              <View style={styles.moodiExportGridWrap}>
-                <View style={styles.grid2x2}>
-                  <View style={styles.gridRow}>
-                    {[0, 1].map((i) => (
-                      <FourCutSlot
-                        key={i}
-                        item={fourSlotIds[i] ? resolveItem(fourSlotIds[i]) : null}
-                        onPress={() => openSlotPicker(i)}
-                      />
-                    ))}
-                  </View>
-                  <View style={styles.gridRow}>
-                    {[2, 3].map((i) => (
-                      <FourCutSlot
-                        key={i}
-                        item={fourSlotIds[i] ? resolveItem(fourSlotIds[i]) : null}
-                        onPress={() => openSlotPicker(i)}
-                      />
-                    ))}
-                  </View>
-                </View>
-              </View>
-              <View style={styles.moodiExportFooter}>
-                <Text style={styles.moodiExportDate}>{formatExportDateLabel()}</Text>
-                <Text style={styles.moodiExportBrandSmall}>Moodi</Text>
-              </View>
-            </View>
-          </View>
         </View>
 
         <View style={styles.archiveHeader}>
@@ -599,7 +562,11 @@ export default function GalleryScreen() {
 
       <View style={styles.moodiShareOffscreen} pointerEvents="none">
         <View ref={moodiCaptureRef} collapsable={false} style={styles.moodiShareCaptureRoot}>
-          <MoodiShareExportLayout fourSlotIds={fourSlotIds} resolveItem={resolveItem} />
+          <TodaysMoodiCanvas
+            slots={fourSlotIds.map((id) => (id ? resolveItem(id) : null))}
+            summaryText={moodiDaySummary}
+            isExport
+          />
         </View>
       </View>
 
@@ -640,10 +607,7 @@ export default function GalleryScreen() {
             keyboardVerticalOffset={0}
             pointerEvents="box-none"
           >
-            <View
-              style={[styles.modalSheetOuter, { paddingBottom: Math.max(8, insets.bottom) }]}
-              pointerEvents="box-none"
-            >
+            <View style={styles.modalSheetOuter} pointerEvents="box-none">
               <Pressable
                 style={styles.emotionModalCard}
                 onPress={(e) => e.stopPropagation()}
@@ -740,9 +704,6 @@ export default function GalleryScreen() {
           <Pressable style={styles.slotModalBackdrop} onPress={() => setSlotPickerVisible(false)} />
           <View style={[styles.slotSheet, { paddingBottom: insets.bottom + 16 }]}>
             <Text style={styles.modalTitle}>앨범에서 선택</Text>
-            <Text style={styles.slotModalSub}>
-              네컷 {activeSlotIndex + 1}번 슬롯 (사진·감정·메모)
-            </Text>
             {fourSlotIds[activeSlotIndex] ? (
               <Pressable style={styles.clearSlotBtn} onPress={clearActiveSlot}>
                 <Text style={styles.clearSlotBtnText}>이 슬롯 비우기</Text>
@@ -782,39 +743,6 @@ export default function GalleryScreen() {
         </View>
       </Modal>
     </NotebookLayout>
-  );
-}
-
-function FourCutSlot({ item, onPress }) {
-  const eid = item?.emotionId || 'happy';
-  const pal = moodPalette[eid] ?? moodPalette.happy;
-
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.emptySlotOuter,
-        pressed && { opacity: 0.92 },
-      ]}
-    >
-      {item ? (
-        <View style={styles.slotColumn}>
-          <View style={[styles.slotPolaroidInner, { borderColor: pal.border }]}>
-            <Image source={{ uri: item.imageUri }} style={styles.slotImage} resizeMode="cover" />
-          </View>
-          <MemoTimeCaption
-            memo={item.memo}
-            timestamp={item.timestamp}
-            memoColor={pal.ink}
-            timeColor={notebook.inkMuted}
-          />
-        </View>
-      ) : (
-        <View style={styles.emptySlotInner}>
-          <Text style={styles.plus}>＋</Text>
-        </View>
-      )}
-    </Pressable>
   );
 }
 
@@ -904,7 +832,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginTop: 12,
   },
   clearAllSlotsBtn: {
     paddingVertical: 6,
@@ -933,57 +861,11 @@ const styles = StyleSheet.create({
     width: '100%',
     overflow: 'hidden',
   },
-  moodiExportCanvas: {
-    width: '100%',
-    backgroundColor: notebook.bg,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: notebook.gridLine,
-    paddingTop: 30,
-    paddingBottom: 28,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-  },
-  moodiExportTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: notebook.ink,
-    textAlign: 'center',
-    letterSpacing: 0.2,
-    marginBottom: 22,
-  },
-  moodiExportGridWrap: {
-    width: '100%',
-    paddingHorizontal: 6,
-    marginBottom: 24,
-  },
-  moodiExportFooter: {
-    width: '100%',
-    alignItems: 'center',
-    gap: 10,
-    paddingTop: 16,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: notebook.gridLine,
-  },
-  moodiExportDate: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: notebook.inkMuted,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  moodiExportBrandSmall: {
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 0.8,
-    color: notebook.inkLight,
-    opacity: 0.75,
-  },
   fourCutCard: {
     borderRadius: 16,
     backgroundColor: '#fff',
     padding: 16,
-    marginBottom: 28,
+    marginBottom: 36,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -994,57 +876,8 @@ const styles = StyleSheet.create({
       android: { elevation: 3 },
     }),
   },
-  grid2x2: {
-    gap: 10,
-  },
-  gridRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  emptySlotOuter: {
-    flex: 1,
-  },
-  slotColumn: {
-    flex: 1,
-  },
-  emptySlotInner: {
-    aspectRatio: 1,
-    borderRadius: 5,
-    backgroundColor: '#f4f6f8',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#e8ecf0',
-  },
-  slotPolaroidInner: {
-    aspectRatio: 1,
-    width: '100%',
-    borderRadius: 5,
-    borderWidth: 3,
-    padding: 3,
-    backgroundColor: '#fff',
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 6,
-      },
-      android: { elevation: 2 },
-    }),
-  },
-  slotImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 3,
-  },
-  plus: {
-    fontSize: 28,
-    color: notebook.inkLight,
-    fontWeight: '300',
-  },
   archiveHeader: {
+    marginTop: 28,
     marginBottom: 14,
   },
   emptyArchive: {
@@ -1116,18 +949,19 @@ const styles = StyleSheet.create({
   },
   modalKeyboardLayer: {
     flex: 1,
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
     backgroundColor: 'transparent',
   },
   modalSheetOuter: {
     width: '100%',
     paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingVertical: 12,
   },
   emotionModalCard: {
     width: '100%',
     maxWidth: 520,
     alignSelf: 'center',
+    marginBottom: 8,
   },
   emotionModalScroll: {
     width: '100%',
@@ -1236,25 +1070,21 @@ const styles = StyleSheet.create({
   },
   slotModalRoot: {
     flex: 1,
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
   },
   slotModalBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.4)',
   },
   slotSheet: {
+    width: '100%',
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 16,
     paddingTop: 18,
     maxHeight: '72%',
-  },
-  slotModalSub: {
-    fontSize: 13,
-    color: notebook.inkMuted,
-    textAlign: 'center',
-    marginBottom: 10,
   },
   clearSlotBtn: {
     alignSelf: 'center',
