@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { MD3LightTheme, PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import MainTabs from './navigation/MainTabs';
+import { MoodProvider } from './src/context/MoodContext';
 import { notebook } from './constants/theme';
 
 const navTheme = {
@@ -33,10 +34,12 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <PaperProvider theme={paperTheme}>
-        <NavigationContainer theme={navTheme}>
-          <StatusBar style="dark" />
-          <MainTabs />
-        </NavigationContainer>
+        <MoodProvider>
+          <NavigationContainer theme={navTheme}>
+            <StatusBar style="dark" />
+            <MainTabs />
+          </NavigationContainer>
+        </MoodProvider>
       </PaperProvider>
     </SafeAreaProvider>
   );

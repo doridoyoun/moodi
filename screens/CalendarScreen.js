@@ -1,21 +1,15 @@
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Surface } from 'react-native-paper';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import NotebookLayout from '../components/NotebookLayout';
+import { useMood } from '../src/context/MoodContext';
 import { moodOrder, moodPalette, notebook } from '../constants/theme';
+import { computeTopTwoEmotionIds } from '../storage/timelineStateStorage';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
-
-/** Demo: April 2026 mood colors for days 1–6 (matches reference). */
-const DEMO_MOODS_APRIL_2026 = {
-  1: 'happy',
-  2: 'calm',
-  3: 'flutter',
-  4: 'gloom',
-  5: 'annoyed',
-  6: 'happy',
-};
 
 function buildMonthGrid(year, monthIndex) {
   const first = new Date(year, monthIndex, 1);
@@ -34,8 +28,16 @@ function buildMonthGrid(year, monthIndex) {
   return cells;
 }
 
+function dateKeyForDay(year, monthIndex, day) {
+  const m = String(monthIndex + 1).padStart(2, '0');
+  const dd = String(day).padStart(2, '0');
+  return `${year}-${m}-${dd}`;
+}
+
 export default function CalendarScreen() {
-  const [cursor, setCursor] = useState(() => new Date(2026, 3, 1));
+  const navigation = useNavigation();
+  const { timelineByDate, setSelectedDate } = useMood();
+  const [cursor, setCursor] = useState(() => new Date());
 
   const year = cursor.getFullYear();
   const monthIndex = cursor.getMonth();
@@ -56,6 +58,15 @@ export default function CalendarScreen() {
 
   const shiftMonth = (delta) => {
     setCursor((d) => new Date(d.getFullYear(), d.getMonth() + delta, 1));
+  };
+
+  const goToTimeline = (day) => {
+    const key = dateKeyForDay(year, monthIndex, day);
+    setSelectedDate(key);
+    navigation.navigate({
+      name: 'Timeline',
+      merge: true,
+    });
   };
 
   return (
@@ -104,44 +115,56 @@ export default function CalendarScreen() {
               if (day == null) {
                 return <View key={`e-${idx}`} style={styles.cell} />;
               }
-              const moodKey =
-                year === 2026 && monthIndex === 3
-                  ? DEMO_MOODS_APRIL_2026[day]
-                  : undefined;
-              const mood = moodKey ? moodPalette[moodKey] : null;
+              const key = dateKeyForDay(year, monthIndex, day);
+              const dayMap = timelineByDate[key];
+              const topTwo = computeTopTwoEmotionIds(dayMap);
+              const fallbackA = 'rgba(255,255,255,0.55)';
+              const fallbackB = 'rgba(247,250,252,0.95)';
+              let gradientColors;
+              if (topTwo.length === 0) {
+                gradientColors = [fallbackA, fallbackB];
+              } else if (topTwo.length === 1) {
+                const c = moodPalette[topTwo[0]]?.bg ?? fallbackA;
+                gradientColors = [c, c];
+              } else {
+                const c0 = moodPalette[topTwo[0]]?.bg ?? fallbackA;
+                const c1 = moodPalette[topTwo[1]]?.bg ?? c0;
+                gradientColors = [c0, c1];
+              }
+
               return (
                 <View key={`d-${day}`} style={styles.cell}>
-                  <View
-                    style={[
-                      styles.dayChip,
-                      mood && {
-                        backgroundColor: mood.bg,
-                        borderColor: mood.border,
-                        borderWidth: 1,
-                      },
-                    ]}
+                  <Pressable
+                    onPress={() => goToTimeline(day)}
+                    style={({ pressed }) => [styles.dayCell, pressed && styles.dayPressActive]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${day}일, 타임라인으로 이동`}
                   >
+                    <LinearGradient
+                      colors={gradientColors}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={StyleSheet.absoluteFillObject}
+                    />
                     <Text
                       style={[
                         styles.dayText,
-                        mood
-                          ? { color: mood.ink, fontWeight: '700' }
-                          : { color: notebook.inkMuted },
+                        { color: topTwo.length ? notebook.ink : notebook.inkMuted },
                       ]}
                     >
                       {day}
                     </Text>
-                  </View>
+                  </Pressable>
                 </View>
               );
             })}
           </View>
 
           <View style={styles.legend}>
-            {moodOrder.map((key) => {
-              const m = moodPalette[key];
+            {moodOrder.map((k) => {
+              const m = moodPalette[k];
               return (
-                <View key={key} style={styles.legendItem}>
+                <View key={k} style={styles.legendItem}>
                   <View style={[styles.dot, { backgroundColor: m.bg, borderColor: m.border }]} />
                   <Text style={styles.legendText}>{m.label}</Text>
                 </View>
@@ -213,22 +236,29 @@ const styles = StyleSheet.create({
   },
   cell: {
     width: '14.2857%',
-    minHeight: 40,
-    paddingVertical: 4,
-    alignItems: 'center',
+    paddingVertical: 3,
+    paddingHorizontal: 2,
+    alignItems: 'stretch',
     justifyContent: 'center',
   },
-  dayChip: {
-    minWidth: 36,
-    minHeight: 36,
+  dayCell: {
+    minHeight: 44,
+    borderRadius: 10,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 10,
-    paddingHorizontal: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.06)',
+  },
+  dayPressActive: {
+    opacity: 0.82,
   },
   dayText: {
+    position: 'relative',
+    zIndex: 1,
     textAlign: 'center',
     fontSize: 13,
+    fontWeight: '700',
   },
   legend: {
     flexDirection: 'row',

@@ -1,13 +1,10 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
-  Animated,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import {
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
   CloudRain,
   Flame,
   Heart,
@@ -15,10 +12,16 @@ import {
   Smile,
 } from 'lucide-react-native';
 import NotebookLayout from '../components/NotebookLayout';
+import { useMood } from '../src/context/MoodContext';
 import { moodOrder, moodPalette, notebook } from '../constants/theme';
+import {
+  createEmptyChunks,
+  createEmptyHourMap,
+  formatDateKeyForDisplay,
+  toDateKey,
+} from '../storage/timelineStateStorage';
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
-const CHUNKS = 6;
 
 const moodIcons = {
   happy: Smile,
@@ -34,93 +37,65 @@ function countToAlpha(count) {
   return 1.0;
 }
 
-function createEmptyChunks() {
-  return Array.from({ length: CHUNKS }, () => null);
-}
-
-function createInitialHourMap() {
-  return Object.fromEntries(HOURS.map((h) => [h, createEmptyChunks()]));
-}
-
 export default function TimelineScreen() {
-  const [hourChunksMap, setHourChunksMap] = useState(createInitialHourMap);
-  const fillOpacityRef = useRef(new Map());
+  const navigation = useNavigation();
+  const {
+    timelineByDate,
+    selectedDate,
+    shiftSelectedDateByDays,
+    applyEmotionForCurrentHour,
+  } = useMood();
 
-  const getFillOpacity = useCallback((hour, chunkIdx) => {
-    const key = `${hour}-${chunkIdx}`;
-    if (!fillOpacityRef.current.has(key)) {
-      fillOpacityRef.current.set(key, new Animated.Value(0));
-    }
-    return fillOpacityRef.current.get(key);
-  }, []);
+  const hourChunksMap = useMemo(() => {
+    return timelineByDate[selectedDate] ?? createEmptyHourMap();
+  }, [timelineByDate, selectedDate]);
 
-  const today = new Date();
-  const dateLabel = today.toLocaleDateString('ko-KR', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    weekday: 'long',
-  });
+  const todayKey = toDateKey(new Date());
+  const isToday = selectedDate === todayKey;
 
-  const applyEmotionForCurrentHour = useCallback(
+  const onEmotion = useCallback(
     (emotionId) => {
-      const hour = new Date().getHours();
-      const minute = new Date().getMinutes();
-      const chunk = Math.min(CHUNKS - 1, Math.floor(minute / 10));
-
-      setHourChunksMap((prev) => {
-        const row = [...(prev[hour] ?? createEmptyChunks())];
-        const prevCell = row[chunk];
-
-        let newCell;
-        if (!prevCell) {
-          newCell = { emotionId, count: 1 };
-        } else if (prevCell.emotionId === emotionId) {
-          newCell = {
-            emotionId,
-            count: Math.min(3, prevCell.count + 1),
-          };
-        } else {
-          newCell = { emotionId, count: 1 };
-        }
-
-        row[chunk] = newCell;
-
-        const anim = getFillOpacity(hour, chunk);
-        const target = countToAlpha(newCell.count);
-
-        if (!prevCell) {
-          anim.setValue(0);
-          Animated.timing(anim, {
-            toValue: target,
-            duration: 260,
-            useNativeDriver: true,
-          }).start();
-        } else if (prevCell.emotionId === emotionId) {
-          Animated.timing(anim, {
-            toValue: target,
-            duration: 220,
-            useNativeDriver: true,
-          }).start();
-        } else {
-          anim.setValue(0);
-          Animated.timing(anim, {
-            toValue: target,
-            duration: 260,
-            useNativeDriver: true,
-          }).start();
-        }
-
-        return { ...prev, [hour]: row };
-      });
+      if (!isToday) return;
+      applyEmotionForCurrentHour(emotionId);
     },
-    [getFillOpacity],
+    [applyEmotionForCurrentHour, isToday],
   );
+
+  const dateLabel = useMemo(
+    () => formatDateKeyForDisplay(selectedDate, 'ko-KR'),
+    [selectedDate],
+  );
+
+  const scrollRef = useRef(null);
+  const hourYRef = useRef({});
+
+  const scrollToCurrentHour = useCallback(() => {
+    if (!isToday) return;
+    const h = new Date().getHours();
+    const y = hourYRef.current[h];
+    if (scrollRef.current == null || y == null) return;
+    scrollRef.current.scrollTo({ y: Math.max(0, y - 8), animated: false });
+  }, [isToday]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const id = requestAnimationFrame(() => {
+        requestAnimationFrame(scrollToCurrentHour);
+      });
+      return () => cancelAnimationFrame(id);
+    }, [scrollToCurrentHour, selectedDate]),
+  );
+
+  useEffect(() => {
+    if (!isToday) return;
+    const t = setTimeout(scrollToCurrentHour, 120);
+    return () => clearTimeout(t);
+  }, [isToday, selectedDate, scrollToCurrentHour]);
 
   return (
     <NotebookLayout
       footer={
-        <View style={styles.fabRow}>
+        <View style={[styles.fabRow, !isToday && styles.fabRowDisabled]}>
           {moodOrder.map((key) => {
             const Icon = moodIcons[key];
             const m = moodPalette[key];
@@ -129,11 +104,12 @@ export default function TimelineScreen() {
                 key={key}
                 accessibilityRole="button"
                 accessibilityLabel={m.label}
-                onPress={() => applyEmotionForCurrentHour(key)}
+                disabled={!isToday}
+                onPress={() => onEmotion(key)}
                 style={({ pressed }) => [
                   styles.fab,
                   { backgroundColor: m.bg, borderColor: m.border },
-                  pressed && { opacity: 0.85 },
+                  pressed && isToday && { opacity: 0.85 },
                 ]}
               >
                 <Icon size={22} color={m.ink} strokeWidth={2} />
@@ -146,9 +122,44 @@ export default function TimelineScreen() {
     >
       <View style={styles.titleBlock}>
         <Text style={styles.pageTitle}>⭐ Today's Mood Timeline</Text>
-        <Text style={styles.date}>{dateLabel}</Text>
+
+        <View style={styles.dateNav}>
+          <Pressable
+            hitSlop={10}
+            onPress={() => shiftSelectedDateByDays(-1)}
+            accessibilityRole="button"
+            accessibilityLabel="어제"
+          >
+            <ChevronLeft size={22} color={notebook.inkMuted} />
+          </Pressable>
+          <View style={styles.dateNavCenter}>
+            <Text style={styles.date}>{dateLabel}</Text>
+            <Pressable
+              style={styles.calendarJump}
+              onPress={() => navigation.navigate('Calendar')}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="캘린더로 이동"
+            >
+              <Calendar size={18} color={notebook.inkMuted} strokeWidth={2} />
+            </Pressable>
+          </View>
+          <Pressable
+            hitSlop={10}
+            onPress={() => shiftSelectedDateByDays(1)}
+            accessibilityRole="button"
+            accessibilityLabel="내일"
+          >
+            <ChevronRight size={22} color={notebook.inkMuted} />
+          </Pressable>
+        </View>
+
+        {!isToday ? (
+          <Text style={styles.hint}>과거·미래 날짜는 조회만 가능해요. 오늘로 이동하면 기록할 수 있어요.</Text>
+        ) : null}
       </View>
       <ScrollView
+        ref={scrollRef}
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator
@@ -156,17 +167,19 @@ export default function TimelineScreen() {
         {HOURS.map((hour) => {
           const row = hourChunksMap[hour] ?? createEmptyChunks();
           return (
-            <View key={hour} style={styles.hourRow}>
+            <View
+              key={hour}
+              style={styles.hourRow}
+              onLayout={(e) => {
+                hourYRef.current[hour] = e.nativeEvent.layout.y;
+              }}
+            >
               <Text style={styles.hourLabel}>
                 {String(hour).padStart(2, '0')}:00
               </Text>
               <View style={styles.chunkRow}>
                 {row.map((cell, chunkIdx) => (
-                  <ChunkCell
-                    key={chunkIdx}
-                    cell={cell}
-                    fillOpacity={getFillOpacity(hour, chunkIdx)}
-                  />
+                  <ChunkCell key={`${selectedDate}-${hour}-${chunkIdx}`} cell={cell} />
                 ))}
               </View>
             </View>
@@ -177,15 +190,17 @@ export default function TimelineScreen() {
   );
 }
 
-function ChunkCell({ cell, fillOpacity }) {
+function ChunkCell({ cell }) {
   const pal = cell ? moodPalette[cell.emotionId] : null;
   const Icon = cell ? moodIcons[cell.emotionId] : null;
+  const fillOpacity = cell ? countToAlpha(cell.count) : 0;
+  const memo = cell?.memo?.trim();
 
   return (
     <View style={styles.chunk}>
       {cell && pal && Icon ? (
         <>
-          <Animated.View
+          <View
             pointerEvents="none"
             style={[
               StyleSheet.absoluteFillObject,
@@ -196,8 +211,13 @@ function ChunkCell({ cell, fillOpacity }) {
               },
             ]}
           />
-          <View style={styles.chunkIcon}>
-            <Icon size={15} color={pal.ink} strokeWidth={2} />
+          <View style={styles.chunkBody}>
+            <Icon size={14} color={pal.ink} strokeWidth={2} />
+            {memo ? (
+              <Text style={[styles.chunkMemo, { color: pal.ink }]} numberOfLines={1}>
+                {memo}
+              </Text>
+            ) : null}
           </View>
         </>
       ) : null}
@@ -215,10 +235,33 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: notebook.ink,
   },
+  dateNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    paddingVertical: 4,
+  },
+  dateNavCenter: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  calendarJump: {
+    padding: 4,
+  },
   date: {
-    marginTop: 6,
     fontSize: 14,
     color: notebook.inkMuted,
+    textAlign: 'center',
+  },
+  hint: {
+    marginTop: 8,
+    fontSize: 12,
+    color: notebook.inkLight,
+    lineHeight: 18,
   },
   scroll: {
     flex: 1,
@@ -243,11 +286,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 2,
     marginLeft: 8,
-    minHeight: 34,
+    minHeight: 40,
   },
   chunk: {
     flex: 1,
-    minHeight: 34,
+    minHeight: 40,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#e8ecf0',
@@ -256,8 +299,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  chunkIcon: {
+  chunkBody: {
     zIndex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+    paddingVertical: 2,
+    gap: 1,
+  },
+  chunkMemo: {
+    fontSize: 8,
+    fontWeight: '500',
+    textAlign: 'center',
+    maxWidth: '100%',
   },
   fabRow: {
     flexDirection: 'row',
@@ -266,6 +320,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 14,
     gap: 6,
+  },
+  fabRowDisabled: {
+    opacity: 0.5,
   },
   fab: {
     flex: 1,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   FlatList,
   Image,
@@ -8,28 +8,16 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FAB, Portal } from 'react-native-paper';
 import NotebookLayout from '../components/NotebookLayout';
+import { useMood } from '../src/context/MoodContext';
 import { moodOrder, moodPalette, notebook } from '../constants/theme';
-import {
-  loadGalleryState,
-  saveGalleryState,
-} from '../storage/galleryStateStorage';
-
-const FOUR_EMPTY = () => /** @type {(string|null)[]} */ ([null, null, null, null]);
-
-function newId() {
-  return `g-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-/** 감정 색 테두리용: border 색을 메인으로 사용 */
-function emotionColorHex(emotionId) {
-  return moodPalette[emotionId]?.border ?? moodPalette.happy.border;
-}
 
 function formatTimeShort(iso) {
   const d = new Date(iso);
@@ -39,44 +27,61 @@ function formatTimeShort(iso) {
   return `${h}:${m}`;
 }
 
+function MemoTimeCaption({ memo, timestamp, memoColor, timeColor }) {
+  const line = (memo || '').trim();
+  const time = formatTimeShort(timestamp);
+  return (
+    <View style={memoTimeStyles.row}>
+      <Text style={[memoTimeStyles.memo, { color: memoColor }]} numberOfLines={2}>
+        {line || '\u00a0'}
+      </Text>
+      <Text style={[memoTimeStyles.time, { color: timeColor }]}>{time}</Text>
+    </View>
+  );
+}
+
+const memoTimeStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+    width: '100%',
+    marginTop: 6,
+  },
+  memo: {
+    flex: 1,
+    fontSize: 10,
+    fontWeight: '500',
+    lineHeight: 14,
+  },
+  time: {
+    fontSize: 10,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+    flexShrink: 0,
+  },
+});
+
 export default function GalleryScreen() {
   const insets = useSafeAreaInsets();
-  const [albumItems, setAlbumItems] = useState([]);
-  const [fourSlotIds, setFourSlotIds] = useState(FOUR_EMPTY);
+  const isFocused = useIsFocused();
+  const {
+    albumItems,
+    fourSlotIds,
+    setFourSlotAt,
+    addAlbumItem,
+    updateAlbumItem,
+  } = useMood();
 
   const [emotionModalVisible, setEmotionModalVisible] = useState(false);
+  const [editingAlbumId, setEditingAlbumId] = useState(null);
   const [pendingImageUri, setPendingImageUri] = useState(null);
+  const [draftMemo, setDraftMemo] = useState('');
+  const [pickedEmotion, setPickedEmotion] = useState(null);
 
   const [slotPickerVisible, setSlotPickerVisible] = useState(false);
   const [activeSlotIndex, setActiveSlotIndex] = useState(0);
-
-  const hydrated = useRef(false);
-  const saveTimer = useRef(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const data = await loadGalleryState();
-      if (cancelled) return;
-      setAlbumItems(data.albumItems);
-      setFourSlotIds(data.fourSlotIds);
-      hydrated.current = true;
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!hydrated.current) return;
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      saveGalleryState({ albumItems, fourSlotIds }).catch(() => {});
-    }, 350);
-    return () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-    };
-  }, [albumItems, fourSlotIds]);
 
   const openImagePickerForNewAlbum = useCallback(async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -91,26 +96,54 @@ export default function GalleryScreen() {
 
     if (result.canceled || !result.assets?.[0]) return;
     setPendingImageUri(result.assets[0].uri);
+    setEditingAlbumId(null);
+    setDraftMemo('');
+    setPickedEmotion(null);
     setEmotionModalVisible(true);
   }, []);
 
-  const confirmEmotionAndAddToAlbum = useCallback((emotionId) => {
-    if (!pendingImageUri) return;
-    const item = {
-      id: newId(),
-      imageUri: pendingImageUri,
-      emotionColor: emotionColorHex(emotionId),
-      timestamp: new Date().toISOString(),
-    };
-    setAlbumItems((prev) => [item, ...prev]);
-    setPendingImageUri(null);
-    setEmotionModalVisible(false);
-  }, [pendingImageUri]);
+  const openEditAlbum = useCallback((item) => {
+    setEditingAlbumId(item.id);
+    setPendingImageUri(item.imageUri);
+    setDraftMemo(item.memo || '');
+    setPickedEmotion(item.emotionId || 'happy');
+    setEmotionModalVisible(true);
+  }, []);
 
-  const cancelEmotionModal = useCallback(() => {
+  const resetEmotionModal = useCallback(() => {
+    setEditingAlbumId(null);
     setPendingImageUri(null);
+    setDraftMemo('');
+    setPickedEmotion(null);
     setEmotionModalVisible(false);
   }, []);
+
+  const submitAlbumEntry = useCallback(() => {
+    if (!pickedEmotion) return;
+    if (editingAlbumId) {
+      updateAlbumItem(editingAlbumId, {
+        emotionId: pickedEmotion,
+        memo: draftMemo,
+      });
+      resetEmotionModal();
+      return;
+    }
+    if (!pendingImageUri) return;
+    addAlbumItem({
+      imageUri: pendingImageUri,
+      emotionId: pickedEmotion,
+      memo: draftMemo,
+    });
+    resetEmotionModal();
+  }, [
+    addAlbumItem,
+    draftMemo,
+    editingAlbumId,
+    pendingImageUri,
+    pickedEmotion,
+    resetEmotionModal,
+    updateAlbumItem,
+  ]);
 
   const openSlotPicker = useCallback((slotIndex) => {
     setActiveSlotIndex(slotIndex);
@@ -119,24 +152,16 @@ export default function GalleryScreen() {
 
   const selectAlbumForSlot = useCallback(
     (albumId) => {
-      setFourSlotIds((prev) => {
-        const next = [...prev];
-        next[activeSlotIndex] = albumId;
-        return next;
-      });
+      setFourSlotAt(activeSlotIndex, albumId);
       setSlotPickerVisible(false);
     },
-    [activeSlotIndex],
+    [activeSlotIndex, setFourSlotAt],
   );
 
   const clearActiveSlot = useCallback(() => {
-    setFourSlotIds((prev) => {
-      const next = [...prev];
-      next[activeSlotIndex] = null;
-      return next;
-    });
+    setFourSlotAt(activeSlotIndex, null);
     setSlotPickerVisible(false);
-  }, [activeSlotIndex]);
+  }, [activeSlotIndex, setFourSlotAt]);
 
   const resolveItem = useCallback(
     (id) => albumItems.find((a) => a.id === id),
@@ -159,7 +184,7 @@ export default function GalleryScreen() {
           <Text style={styles.sectionKicker}>Four-Cut</Text>
           <Text style={styles.sectionTitle}>오늘의 네컷</Text>
           <Text style={styles.sectionHint}>
-            슬롯을 눌러 앨범 사진을 넣거나 바꿀 수 있어요
+            슬롯을 눌러 앨범에서 사진·감정·메모 세트를 넣을 수 있어요
           </Text>
         </View>
 
@@ -168,7 +193,7 @@ export default function GalleryScreen() {
           <View style={styles.grid2x2}>
             <View style={styles.gridRow}>
               {[0, 1].map((i) => (
-                <FourCutEmptySlot
+                <FourCutSlot
                   key={i}
                   item={fourSlotIds[i] ? resolveItem(fourSlotIds[i]) : null}
                   onPress={() => openSlotPicker(i)}
@@ -177,7 +202,7 @@ export default function GalleryScreen() {
             </View>
             <View style={styles.gridRow}>
               {[2, 3].map((i) => (
-                <FourCutEmptySlot
+                <FourCutSlot
                   key={i}
                   item={fourSlotIds[i] ? resolveItem(fourSlotIds[i]) : null}
                   onPress={() => openSlotPicker(i)}
@@ -194,48 +219,68 @@ export default function GalleryScreen() {
 
         {albumItems.length === 0 ? (
           <Text style={styles.emptyArchive}>
-            사진 추가 버튼으로 감정과 함께 기록을 남겨 보세요.
+            사진 추가 버튼으로 감정과 메모를 남겨 보세요.
           </Text>
         ) : (
           <View style={styles.archiveGrid}>
             {albumItems.map((item) => (
-              <AlbumPolaroid key={item.id} item={item} />
+              <AlbumPolaroid key={item.id} item={item} onPress={() => openEditAlbum(item)} />
             ))}
           </View>
         )}
       </ScrollView>
 
-      <Portal>
-        <FAB
-          icon="plus"
-          style={[
-            styles.fab,
-            { bottom: insets.bottom + 56, right: Math.max(16, insets.right + 8) },
-          ]}
-          onPress={openImagePickerForNewAlbum}
-          accessibilityLabel="감정 폴라로이드 사진 추가"
-        />
-      </Portal>
+      {isFocused ? (
+        <Portal>
+          <FAB
+            icon="plus"
+            color={notebook.fabLightInk}
+            style={[
+              styles.fab,
+              {
+                bottom: insets.bottom + 76,
+                right: Math.max(20, insets.right + 10),
+              },
+            ]}
+            onPress={openImagePickerForNewAlbum}
+            accessibilityLabel="감정 폴라로이드 사진 추가"
+          />
+        </Portal>
+      ) : null}
 
       <Modal
         visible={emotionModalVisible}
         transparent
         animationType="fade"
-        onRequestClose={cancelEmotionModal}
+        onRequestClose={resetEmotionModal}
       >
-        <Pressable style={styles.modalBackdrop} onPress={cancelEmotionModal}>
+        <Pressable style={styles.modalBackdrop} onPress={resetEmotionModal}>
           <Pressable style={styles.emotionSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>감정을 선택해 주세요</Text>
+            <Text style={styles.modalTitle}>
+              {editingAlbumId ? '폴라로이드 수정' : '메모와 감정을 남겨 주세요'}
+            </Text>
+            <TextInput
+              value={draftMemo}
+              onChangeText={setDraftMemo}
+              placeholder="짧은 메모..."
+              placeholderTextColor={notebook.inkLight}
+              maxLength={120}
+              multiline
+              style={styles.memoField}
+            />
+            <Text style={styles.modalSub}>감정 선택</Text>
             <View style={styles.emotionGrid}>
               {moodOrder.map((id) => {
                 const m = moodPalette[id];
+                const selected = pickedEmotion === id;
                 return (
                   <Pressable
                     key={id}
-                    onPress={() => confirmEmotionAndAddToAlbum(id)}
+                    onPress={() => setPickedEmotion(id)}
                     style={({ pressed }) => [
                       styles.emotionChip,
                       { backgroundColor: m.bg, borderColor: m.border },
+                      selected && styles.emotionChipSelected,
                       pressed && { opacity: 0.88 },
                     ]}
                   >
@@ -244,7 +289,18 @@ export default function GalleryScreen() {
                 );
               })}
             </View>
-            <Pressable onPress={cancelEmotionModal} style={styles.modalCancel}>
+            <Pressable
+              onPress={submitAlbumEntry}
+              disabled={!pickedEmotion}
+              style={({ pressed }) => [
+                styles.submitBtn,
+                !pickedEmotion && styles.submitBtnDisabled,
+                pressed && pickedEmotion && { opacity: 0.9 },
+              ]}
+            >
+              <Text style={styles.submitBtnText}>{editingAlbumId ? '저장' : '앨범에 추가'}</Text>
+            </Pressable>
+            <Pressable onPress={resetEmotionModal} style={styles.modalCancel}>
               <Text style={styles.modalCancelText}>취소</Text>
             </Pressable>
           </Pressable>
@@ -262,7 +318,7 @@ export default function GalleryScreen() {
           <View style={[styles.slotSheet, { paddingBottom: insets.bottom + 16 }]}>
             <Text style={styles.modalTitle}>앨범에서 선택</Text>
             <Text style={styles.slotModalSub}>
-              네컷 {activeSlotIndex + 1}번 슬롯
+              네컷 {activeSlotIndex + 1}번 슬롯 (사진·감정·메모)
             </Text>
             {fourSlotIds[activeSlotIndex] ? (
               <Pressable style={styles.clearSlotBtn} onPress={clearActiveSlot}>
@@ -278,18 +334,22 @@ export default function GalleryScreen() {
                 numColumns={3}
                 contentContainerStyle={styles.pickerGrid}
                 columnWrapperStyle={styles.pickerRow}
-                renderItem={({ item }) => (
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.pickerThumbWrap,
-                      { borderColor: item.emotionColor },
-                      pressed && { opacity: 0.9 },
-                    ]}
-                    onPress={() => selectAlbumForSlot(item.id)}
-                  >
-                    <Image source={{ uri: item.imageUri }} style={styles.pickerThumb} />
-                  </Pressable>
-                )}
+                renderItem={({ item }) => {
+                  const eid = item.emotionId || 'happy';
+                  const border = moodPalette[eid]?.border ?? moodPalette.happy.border;
+                  return (
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.pickerThumbWrap,
+                        { borderColor: border },
+                        pressed && { opacity: 0.9 },
+                      ]}
+                      onPress={() => selectAlbumForSlot(item.id)}
+                    >
+                      <Image source={{ uri: item.imageUri }} style={styles.pickerThumb} />
+                    </Pressable>
+                  );
+                }}
               />
             )}
             <Pressable style={styles.modalCloseBtn} onPress={() => setSlotPickerVisible(false)}>
@@ -302,7 +362,10 @@ export default function GalleryScreen() {
   );
 }
 
-function FourCutEmptySlot({ item, onPress }) {
+function FourCutSlot({ item, onPress }) {
+  const eid = item?.emotionId || 'happy';
+  const pal = moodPalette[eid] ?? moodPalette.happy;
+
   return (
     <Pressable
       onPress={onPress}
@@ -312,8 +375,16 @@ function FourCutEmptySlot({ item, onPress }) {
       ]}
     >
       {item ? (
-        <View style={[styles.slotPolaroidInner, { borderColor: item.emotionColor }]}>
-          <Image source={{ uri: item.imageUri }} style={styles.slotImage} resizeMode="cover" />
+        <View style={styles.slotColumn}>
+          <View style={[styles.slotPolaroidInner, { borderColor: pal.border }]}>
+            <Image source={{ uri: item.imageUri }} style={styles.slotImage} resizeMode="cover" />
+          </View>
+          <MemoTimeCaption
+            memo={item.memo}
+            timestamp={item.timestamp}
+            memoColor={pal.ink}
+            timeColor={notebook.inkMuted}
+          />
         </View>
       ) : (
         <View style={styles.emptySlotInner}>
@@ -324,16 +395,23 @@ function FourCutEmptySlot({ item, onPress }) {
   );
 }
 
-function AlbumPolaroid({ item }) {
-  const time = formatTimeShort(item.timestamp);
+function AlbumPolaroid({ item, onPress }) {
+  const eid = item.emotionId || 'happy';
+  const pal = moodPalette[eid] ?? moodPalette.happy;
+
   return (
-    <View style={styles.polaroid}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.polaroid, pressed && { opacity: 0.94 }]}
+      accessibilityRole="button"
+      accessibilityLabel="폴라로이드 수정"
+    >
       <View
         style={[
           styles.polaroidFrame,
           {
-            borderColor: item.emotionColor,
-            shadowColor: item.emotionColor,
+            borderColor: pal.border,
+            shadowColor: pal.border,
           },
         ]}
       >
@@ -341,12 +419,15 @@ function AlbumPolaroid({ item }) {
           <Image source={{ uri: item.imageUri }} style={styles.polaroidImage} resizeMode="cover" />
         </View>
       </View>
-      <View style={styles.polaroidMeta}>
-        <Text style={styles.polaroidTime} numberOfLines={1}>
-          {time}
-        </Text>
+      <View style={[styles.polaroidCaptionBar, { backgroundColor: pal.bg }]}>
+        <MemoTimeCaption
+          memo={item.memo}
+          timestamp={item.timestamp}
+          memoColor={pal.ink}
+          timeColor={notebook.inkMuted}
+        />
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -426,6 +507,9 @@ const styles = StyleSheet.create({
   emptySlotOuter: {
     flex: 1,
   },
+  slotColumn: {
+    flex: 1,
+  },
   emptySlotInner: {
     aspectRatio: 1,
     borderRadius: 14,
@@ -437,6 +521,7 @@ const styles = StyleSheet.create({
   },
   slotPolaroidInner: {
     aspectRatio: 1,
+    width: '100%',
     borderRadius: 14,
     borderWidth: 3,
     padding: 3,
@@ -507,20 +592,17 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  polaroidMeta: {
-    paddingTop: 8,
-    paddingHorizontal: 4,
-  },
-  polaroidTime: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: notebook.inkMuted,
-    textAlign: 'center',
+  polaroidCaptionBar: {
+    minHeight: 48,
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+    opacity: 0.98,
   },
   fab: {
     position: 'absolute',
     margin: 0,
-    backgroundColor: notebook.ink,
+    backgroundColor: notebook.fabLight,
   },
   modalBackdrop: {
     flex: 1,
@@ -532,13 +614,32 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 18,
     padding: 20,
+    maxHeight: '90%',
   },
   modalTitle: {
     fontSize: 17,
     fontWeight: '700',
     color: notebook.ink,
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
+  },
+  modalSub: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: notebook.inkMuted,
+    marginBottom: 8,
+  },
+  memoField: {
+    borderWidth: 1,
+    borderColor: notebook.gridLine,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: notebook.ink,
+    minHeight: 72,
+    textAlignVertical: 'top',
+    marginBottom: 14,
   },
   emotionGrid: {
     flexDirection: 'row',
@@ -554,12 +655,31 @@ const styles = StyleSheet.create({
     minWidth: '28%',
     alignItems: 'center',
   },
+  emotionChipSelected: {
+    borderWidth: 3,
+    transform: [{ scale: 1.02 }],
+  },
   emotionChipLabel: {
     fontSize: 14,
     fontWeight: '700',
   },
-  modalCancel: {
+  submitBtn: {
     marginTop: 16,
+    backgroundColor: notebook.ink,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  submitBtnDisabled: {
+    opacity: 0.4,
+  },
+  submitBtnText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  modalCancel: {
+    marginTop: 12,
     alignItems: 'center',
     paddingVertical: 10,
   },

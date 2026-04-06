@@ -1,6 +1,9 @@
 export const notebook = {
   bg: '#f7fafc',
   gridLine: '#e3eef5',
+  /** Gallery FAB — 밝은 회색, 파스텔 톤과 조화 */
+  fabLight: '#E5E5E5',
+  fabLightInk: '#757575',
   ink: '#3d3d3d',
   inkMuted: '#6b7280',
   inkLight: '#9ca3af',
