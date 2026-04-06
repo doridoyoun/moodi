@@ -1,5 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
+  Alert,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -13,9 +14,19 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as MediaLibrary from 'expo-media-library';
 import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  CloudRain,
+  Download,
+  Flame,
+  Heart,
+  Leaf,
+  Smile,
+} from 'lucide-react-native';
 import { FAB, Portal } from 'react-native-paper';
+import { captureRef } from 'react-native-view-shot';
 import NotebookLayout from '../components/NotebookLayout';
 import { useMood } from '../src/context/MoodContext';
 import { moodOrder, moodPalette, notebook } from '../constants/theme';
@@ -26,6 +37,177 @@ function formatTimeShort(iso) {
   const h = String(d.getHours()).padStart(2, '0');
   const m = String(d.getMinutes()).padStart(2, '0');
   return `${h}:${m}`;
+}
+
+function formatExportDateLabel() {
+  return new Date().toLocaleDateString('ko-KR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long',
+  });
+}
+
+/** 네컷 저장 이미지 하단 — 한 줄로 읽기 쉽게 */
+function formatMoodiShareFooterDate() {
+  return new Date().toLocaleDateString('ko-KR', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  });
+}
+
+const modalEmotionIcons = {
+  happy: Smile,
+  flutter: Heart,
+  calm: Leaf,
+  gloom: CloudRain,
+  annoyed: Flame,
+};
+
+const moodiShareStyles = StyleSheet.create({
+  card: {
+    width: 340,
+    backgroundColor: '#faf9f7',
+    borderRadius: 20,
+    paddingTop: 22,
+    paddingBottom: 18,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: notebook.ink,
+    letterSpacing: 0.4,
+    marginBottom: 14,
+  },
+  grid: {
+    width: '100%',
+    gap: 8,
+  },
+  row: {
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between',
+  },
+  cell: {
+    flex: 1,
+    maxWidth: '50%',
+  },
+  photoFr: {
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: 12,
+    borderWidth: 2,
+    overflow: 'hidden',
+    backgroundColor: '#fff',
+  },
+  photo: {
+    width: '100%',
+    height: '100%',
+  },
+  photoEmpty: {
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: 12,
+    backgroundColor: '#eceae6',
+    borderWidth: 1,
+    borderColor: '#e0ddd8',
+  },
+  captionCol: {
+    marginTop: 5,
+    paddingHorizontal: 2,
+    gap: 2,
+  },
+  memoLine: {
+    fontSize: 10,
+    fontWeight: '600',
+    lineHeight: 13,
+  },
+  memoPlaceholder: {
+    fontSize: 10,
+    lineHeight: 13,
+  },
+  timeLine: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: notebook.inkMuted,
+    fontVariant: ['tabular-nums'],
+  },
+  timeMuted: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: notebook.inkLight,
+  },
+  footerDate: {
+    marginTop: 14,
+    fontSize: 11,
+    fontWeight: '600',
+    color: notebook.inkMuted,
+    letterSpacing: 0.2,
+  },
+  footerBrand: {
+    marginTop: 4,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 1,
+    color: notebook.inkLight,
+    opacity: 0.75,
+  },
+});
+
+function MoodiShareExportLayout({ fourSlotIds, resolveItem }) {
+  const slots = fourSlotIds.map((id) => (id ? resolveItem(id) : null));
+  return (
+    <View style={moodiShareStyles.card}>
+      <Text style={moodiShareStyles.title}>{"Today's Moodi"}</Text>
+      <View style={moodiShareStyles.grid}>
+        <View style={moodiShareStyles.row}>
+          <MoodiShareCell item={slots[0]} />
+          <MoodiShareCell item={slots[1]} />
+        </View>
+        <View style={moodiShareStyles.row}>
+          <MoodiShareCell item={slots[2]} />
+          <MoodiShareCell item={slots[3]} />
+        </View>
+      </View>
+      <Text style={moodiShareStyles.footerDate}>{formatMoodiShareFooterDate()}</Text>
+      <Text style={moodiShareStyles.footerBrand}>Moodi</Text>
+    </View>
+  );
+}
+
+function MoodiShareCell({ item }) {
+  if (!item) {
+    return (
+      <View style={moodiShareStyles.cell}>
+        <View style={moodiShareStyles.photoEmpty} />
+        <View style={moodiShareStyles.captionCol}>
+          <Text style={moodiShareStyles.memoPlaceholder} numberOfLines={1}>
+            {' '}
+          </Text>
+          <Text style={moodiShareStyles.timeMuted}>–</Text>
+        </View>
+      </View>
+    );
+  }
+  const eid = item.emotionId || 'happy';
+  const pal = moodPalette[eid] ?? moodPalette.happy;
+  const memo = (item.memo || '').trim();
+  return (
+    <View style={moodiShareStyles.cell}>
+      <View style={[moodiShareStyles.photoFr, { borderColor: pal.border }]}>
+        <Image source={{ uri: item.imageUri }} style={moodiShareStyles.photo} resizeMode="cover" />
+      </View>
+      <View style={moodiShareStyles.captionCol}>
+        <Text style={[moodiShareStyles.memoLine, { color: pal.ink }]} numberOfLines={1}>
+          {memo || ' '}
+        </Text>
+        <Text style={moodiShareStyles.timeLine}>{formatTimeShort(item.timestamp)}</Text>
+      </View>
+    </View>
+  );
 }
 
 function MemoTimeCaption({ memo, timestamp, memoColor, timeColor }) {
@@ -82,6 +264,7 @@ function ArchiveMemoTimeCaption({ memo, timestamp, memoColor, timeColor }) {
       <Text
         style={[archiveCaptionStyles.memo, { color: memoColor }]}
         numberOfLines={2}
+        ellipsizeMode="tail"
       >
         {line}
       </Text>
@@ -92,11 +275,10 @@ function ArchiveMemoTimeCaption({ memo, timestamp, memoColor, timeColor }) {
 
 const archiveCaptionStyles = StyleSheet.create({
   centeredStrip: {
+    flex: 1,
     width: '100%',
-    minHeight: 40,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 2,
   },
   timeSolo: {
     fontSize: 11,
@@ -104,17 +286,18 @@ const archiveCaptionStyles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   row: {
+    flex: 1,
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 10,
-    width: '100%',
+    gap: 8,
   },
   memo: {
     flex: 1,
     fontSize: 11,
     fontWeight: '500',
-    lineHeight: 16,
+    lineHeight: 15,
   },
   time: {
     fontSize: 11,
@@ -131,8 +314,10 @@ export default function GalleryScreen() {
     albumItems,
     fourSlotIds,
     setFourSlotAt,
+    clearAllFourSlots,
     addAlbumItem,
     updateAlbumItem,
+    deleteAlbumItem,
   } = useMood();
 
   const [emotionModalVisible, setEmotionModalVisible] = useState(false);
@@ -144,9 +329,50 @@ export default function GalleryScreen() {
   const [slotPickerVisible, setSlotPickerVisible] = useState(false);
   const [activeSlotIndex, setActiveSlotIndex] = useState(0);
 
-  const openImagePickerForNewAlbum = useCallback(async () => {
+  const moodiCaptureRef = useRef(null);
+  const [savingMoodi, setSavingMoodi] = useState(false);
+
+  const saveTodaysMoodiImage = useCallback(async () => {
+    if (savingMoodi) return;
+    setSavingMoodi(true);
+    try {
+      const perm = await MediaLibrary.requestPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('알림', '사진을 저장하려면 갤러리 접근을 허용해 주세요.');
+        return;
+      }
+      const node = moodiCaptureRef.current;
+      if (!node) {
+        Alert.alert('오류', '저장에 실패했습니다. 다시 시도해 주세요.');
+        return;
+      }
+      const uri = await captureRef(node, {
+        format: 'png',
+        quality: 1,
+      });
+      await MediaLibrary.saveToLibraryAsync(uri);
+      Alert.alert('저장 완료', '저장이 완료되었습니다');
+    } catch {
+      Alert.alert('오류', '저장에 실패했습니다. 다시 시도해 주세요.');
+    } finally {
+      setSavingMoodi(false);
+    }
+  }, [savingMoodi]);
+
+  const beginNewAlbumFromImageUri = useCallback((uri) => {
+    setPendingImageUri(uri);
+    setEditingAlbumId(null);
+    setDraftMemo('');
+    setPickedEmotion(null);
+    setEmotionModalVisible(true);
+  }, []);
+
+  const openGalleryForNewAlbum = useCallback(async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
+    if (!perm.granted) {
+      Alert.alert('알림', '사진을 선택하려면 갤러리 접근을 허용해 주세요.');
+      return;
+    }
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -156,12 +382,33 @@ export default function GalleryScreen() {
     });
 
     if (result.canceled || !result.assets?.[0]) return;
-    setPendingImageUri(result.assets[0].uri);
-    setEditingAlbumId(null);
-    setDraftMemo('');
-    setPickedEmotion(null);
-    setEmotionModalVisible(true);
-  }, []);
+    beginNewAlbumFromImageUri(result.assets[0].uri);
+  }, [beginNewAlbumFromImageUri]);
+
+  const openCameraForNewAlbum = useCallback(async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('알림', '사진을 촬영하려면 카메라 접근을 허용해 주세요.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.88,
+    });
+
+    if (result.canceled || !result.assets?.[0]) return;
+    beginNewAlbumFromImageUri(result.assets[0].uri);
+  }, [beginNewAlbumFromImageUri]);
+
+  const openAlbumPhotoSourceChooser = useCallback(() => {
+    Alert.alert('사진 추가', '', [
+      { text: '취소', style: 'cancel' },
+      { text: '앨범에서 선택', onPress: () => void openGalleryForNewAlbum() },
+      { text: '사진 찍기', onPress: () => void openCameraForNewAlbum() },
+    ]);
+  }, [openCameraForNewAlbum, openGalleryForNewAlbum]);
 
   const openEditAlbum = useCallback((item) => {
     setEditingAlbumId(item.id);
@@ -178,6 +425,21 @@ export default function GalleryScreen() {
     setPickedEmotion(null);
     setEmotionModalVisible(false);
   }, []);
+
+  const confirmDeletePolaroid = useCallback(() => {
+    if (!editingAlbumId) return;
+    Alert.alert('폴라로이드 삭제', '이 폴라로이드를 삭제할까요?', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '삭제',
+        style: 'destructive',
+        onPress: () => {
+          deleteAlbumItem(editingAlbumId);
+          resetEmotionModal();
+        },
+      },
+    ]);
+  }, [deleteAlbumItem, editingAlbumId, resetEmotionModal]);
 
   const submitAlbumEntry = useCallback(() => {
     if (!pickedEmotion) return;
@@ -229,6 +491,15 @@ export default function GalleryScreen() {
     [albumItems],
   );
 
+  const confirmClearAllFourSlots = useCallback(() => {
+    const hasAny = fourSlotIds.some(Boolean);
+    if (!hasAny) return;
+    Alert.alert('네컷 비우기', '오늘의 Moodi 슬롯을 모두 비울까요?', [
+      { text: '취소', style: 'cancel' },
+      { text: '비우기', style: 'destructive', onPress: clearAllFourSlots },
+    ]);
+  }, [clearAllFourSlots, fourSlotIds]);
+
   return (
     <NotebookLayout>
       <ScrollView
@@ -243,32 +514,67 @@ export default function GalleryScreen() {
 
         <View style={styles.sectionLabel}>
           <Text style={styles.sectionKicker}>Four-Cut</Text>
-          <Text style={styles.sectionTitle}>오늘의 네컷</Text>
+          <Text style={styles.sectionTitle}>{"Today's Moodi"}</Text>
           <Text style={styles.sectionHint}>
             슬롯을 눌러 앨범에서 사진·감정·메모 세트를 넣을 수 있어요
           </Text>
         </View>
 
         <View style={styles.fourCutCard}>
-          <Text style={styles.shotTitle}>오늘의 네컷</Text>
-          <View style={styles.grid2x2}>
-            <View style={styles.gridRow}>
-              {[0, 1].map((i) => (
-                <FourCutSlot
-                  key={i}
-                  item={fourSlotIds[i] ? resolveItem(fourSlotIds[i]) : null}
-                  onPress={() => openSlotPicker(i)}
-                />
-              ))}
-            </View>
-            <View style={styles.gridRow}>
-              {[2, 3].map((i) => (
-                <FourCutSlot
-                  key={i}
-                  item={fourSlotIds[i] ? resolveItem(fourSlotIds[i]) : null}
-                  onPress={() => openSlotPicker(i)}
-                />
-              ))}
+          <View style={styles.fourCutTitleRow}>
+            <Pressable
+              onPress={confirmClearAllFourSlots}
+              hitSlop={8}
+              style={({ pressed }) => [styles.clearAllSlotsBtn, pressed && { opacity: 0.75 }]}
+              accessibilityRole="button"
+              accessibilityLabel="네컷 슬롯 전체 비우기"
+            >
+              <Text style={styles.clearAllSlotsText}>전체 비우기</Text>
+            </Pressable>
+            <Pressable
+              onPress={saveTodaysMoodiImage}
+              disabled={savingMoodi}
+              style={({ pressed }) => [
+                styles.saveMoodiBtn,
+                (pressed && !savingMoodi) && { opacity: 0.72 },
+                savingMoodi && { opacity: 0.45 },
+              ]}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={"Today's Moodi 이미지로 저장"}
+            >
+              <Download size={20} color={notebook.inkMuted} strokeWidth={2} />
+            </Pressable>
+          </View>
+          <View style={styles.moodiCaptureOuter}>
+            <View style={styles.moodiExportCanvas}>
+              <Text style={styles.moodiExportTitle}>{"Today's Moodi"}</Text>
+              <View style={styles.moodiExportGridWrap}>
+                <View style={styles.grid2x2}>
+                  <View style={styles.gridRow}>
+                    {[0, 1].map((i) => (
+                      <FourCutSlot
+                        key={i}
+                        item={fourSlotIds[i] ? resolveItem(fourSlotIds[i]) : null}
+                        onPress={() => openSlotPicker(i)}
+                      />
+                    ))}
+                  </View>
+                  <View style={styles.gridRow}>
+                    {[2, 3].map((i) => (
+                      <FourCutSlot
+                        key={i}
+                        item={fourSlotIds[i] ? resolveItem(fourSlotIds[i]) : null}
+                        onPress={() => openSlotPicker(i)}
+                      />
+                    ))}
+                  </View>
+                </View>
+              </View>
+              <View style={styles.moodiExportFooter}>
+                <Text style={styles.moodiExportDate}>{formatExportDateLabel()}</Text>
+                <Text style={styles.moodiExportBrandSmall}>Moodi</Text>
+              </View>
             </View>
           </View>
         </View>
@@ -291,6 +597,12 @@ export default function GalleryScreen() {
         )}
       </ScrollView>
 
+      <View style={styles.moodiShareOffscreen} pointerEvents="none">
+        <View ref={moodiCaptureRef} collapsable={false} style={styles.moodiShareCaptureRoot}>
+          <MoodiShareExportLayout fourSlotIds={fourSlotIds} resolveItem={resolveItem} />
+        </View>
+      </View>
+
       {isFocused ? (
         <Portal>
           <FAB
@@ -303,7 +615,7 @@ export default function GalleryScreen() {
                 right: Math.max(20, insets.right + 10),
               },
             ]}
-            onPress={openImagePickerForNewAlbum}
+            onPress={openAlbumPhotoSourceChooser}
             accessibilityLabel="감정 폴라로이드 사진 추가"
           />
         </Portal>
@@ -315,77 +627,107 @@ export default function GalleryScreen() {
         animationType="fade"
         onRequestClose={resetEmotionModal}
       >
-        <KeyboardAvoidingView
-          style={styles.modalKeyboardRoot}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
-        >
-          <Pressable style={styles.modalBackdrop} onPress={resetEmotionModal}>
-            <Pressable style={styles.emotionModalInner} onPress={(e) => e.stopPropagation()}>
-              <ScrollView
-                style={styles.emotionModalScroll}
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}
-                bounces={false}
-                nestedScrollEnabled
-                contentContainerStyle={[
-                  styles.emotionModalScrollContent,
-                  { paddingBottom: Math.max(16, insets.bottom + 12) },
-                ]}
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={StyleSheet.absoluteFillObject}
+            onPress={resetEmotionModal}
+            accessibilityRole="button"
+            accessibilityLabel="닫기"
+          />
+          <KeyboardAvoidingView
+            style={styles.modalKeyboardLayer}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={0}
+            pointerEvents="box-none"
+          >
+            <View
+              style={[styles.modalSheetOuter, { paddingBottom: Math.max(8, insets.bottom) }]}
+              pointerEvents="box-none"
+            >
+              <Pressable
+                style={styles.emotionModalCard}
+                onPress={(e) => e.stopPropagation()}
               >
-                <View style={styles.emotionSheet}>
-                  <Text style={styles.modalTitle}>
-                    {editingAlbumId ? '폴라로이드 수정' : '메모와 감정을 남겨 주세요'}
-                  </Text>
-                  <TextInput
-                    value={draftMemo}
-                    onChangeText={setDraftMemo}
-                    placeholder="짧은 메모..."
-                    placeholderTextColor={notebook.inkLight}
-                    maxLength={120}
-                    multiline
-                    style={styles.memoField}
-                  />
-                  <Text style={styles.modalSub}>감정 선택</Text>
-                  <View style={styles.emotionGrid}>
-                    {moodOrder.map((id) => {
-                      const m = moodPalette[id];
-                      const selected = pickedEmotion === id;
-                      return (
-                        <Pressable
-                          key={id}
-                          onPress={() => setPickedEmotion(id)}
-                          style={({ pressed }) => [
-                            styles.emotionChip,
-                            { backgroundColor: m.bg, borderColor: m.border },
-                            selected && styles.emotionChipSelected,
-                            pressed && { opacity: 0.88 },
-                          ]}
-                        >
-                          <Text style={[styles.emotionChipLabel, { color: m.ink }]}>{m.label}</Text>
-                        </Pressable>
-                      );
-                    })}
+                <ScrollView
+                  style={styles.emotionModalScroll}
+                  keyboardShouldPersistTaps="handled"
+                  keyboardDismissMode="on-drag"
+                  showsVerticalScrollIndicator={false}
+                  bounces={false}
+                  nestedScrollEnabled
+                  contentContainerStyle={styles.emotionModalScrollContent}
+                >
+                  <View style={styles.emotionSheet}>
+                    <Text style={styles.modalTitle}>
+                      {editingAlbumId ? '폴라로이드 수정' : '메모와 감정을 남겨 주세요'}
+                    </Text>
+                    <TextInput
+                      value={draftMemo}
+                      onChangeText={setDraftMemo}
+                      placeholder="짧은 메모..."
+                      placeholderTextColor={notebook.inkLight}
+                      maxLength={120}
+                      multiline
+                      style={styles.memoField}
+                    />
+                    <Text style={styles.modalSub}>감정 선택</Text>
+                    <View style={styles.emotionRowModal}>
+                      {moodOrder.map((id) => {
+                        const m = moodPalette[id];
+                        const Icon = modalEmotionIcons[id];
+                        const selected = pickedEmotion === id;
+                        return (
+                          <Pressable
+                            key={id}
+                            onPress={() => setPickedEmotion(id)}
+                            accessibilityLabel={m.label}
+                            style={({ pressed }) => [
+                              styles.emotionCircleBtn,
+                              {
+                                backgroundColor: m.bg,
+                                borderColor: selected ? m.border : 'rgba(15, 23, 42, 0.12)',
+                              },
+                              selected && styles.emotionCircleBtnSelected,
+                              pressed && { opacity: 0.88 },
+                            ]}
+                          >
+                            <Icon
+                              size={22}
+                              color={m.ink}
+                              strokeWidth={selected ? 2.35 : 2}
+                            />
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    <Pressable
+                      onPress={submitAlbumEntry}
+                      disabled={!pickedEmotion}
+                      style={({ pressed }) => [
+                        styles.submitBtn,
+                        !pickedEmotion && styles.submitBtnDisabled,
+                        pressed && pickedEmotion && { opacity: 0.9 },
+                      ]}
+                    >
+                      <Text style={styles.submitBtnText}>{editingAlbumId ? '저장' : '앨범에 추가'}</Text>
+                    </Pressable>
+                    {editingAlbumId ? (
+                      <Pressable
+                        onPress={confirmDeletePolaroid}
+                        style={({ pressed }) => [styles.modalDeleteBtn, pressed && { opacity: 0.85 }]}
+                      >
+                        <Text style={styles.modalDeleteText}>삭제</Text>
+                      </Pressable>
+                    ) : null}
+                    <Pressable onPress={resetEmotionModal} style={styles.modalCancel}>
+                      <Text style={styles.modalCancelText}>취소</Text>
+                    </Pressable>
                   </View>
-                  <Pressable
-                    onPress={submitAlbumEntry}
-                    disabled={!pickedEmotion}
-                    style={({ pressed }) => [
-                      styles.submitBtn,
-                      !pickedEmotion && styles.submitBtnDisabled,
-                      pressed && pickedEmotion && { opacity: 0.9 },
-                    ]}
-                  >
-                    <Text style={styles.submitBtnText}>{editingAlbumId ? '저장' : '앨범에 추가'}</Text>
-                  </Pressable>
-                  <Pressable onPress={resetEmotionModal} style={styles.modalCancel}>
-                    <Text style={styles.modalCancelText}>취소</Text>
-                  </Pressable>
-                </View>
-              </ScrollView>
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
+                </ScrollView>
+              </Pressable>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
 
       <Modal
@@ -558,6 +900,85 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: notebook.inkMuted,
   },
+  fourCutTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  clearAllSlotsBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+  },
+  clearAllSlotsText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: notebook.inkLight,
+  },
+  moodiShareOffscreen: {
+    position: 'absolute',
+    left: -12000,
+    top: 0,
+  },
+  moodiShareCaptureRoot: {
+    alignItems: 'center',
+  },
+  saveMoodiBtn: {
+    width: 36,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moodiCaptureOuter: {
+    width: '100%',
+    overflow: 'hidden',
+  },
+  moodiExportCanvas: {
+    width: '100%',
+    backgroundColor: notebook.bg,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: notebook.gridLine,
+    paddingTop: 30,
+    paddingBottom: 28,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  moodiExportTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: notebook.ink,
+    textAlign: 'center',
+    letterSpacing: 0.2,
+    marginBottom: 22,
+  },
+  moodiExportGridWrap: {
+    width: '100%',
+    paddingHorizontal: 6,
+    marginBottom: 24,
+  },
+  moodiExportFooter: {
+    width: '100%',
+    alignItems: 'center',
+    gap: 10,
+    paddingTop: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: notebook.gridLine,
+  },
+  moodiExportDate: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: notebook.inkMuted,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  moodiExportBrandSmall: {
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 0.8,
+    color: notebook.inkLight,
+    opacity: 0.75,
+  },
   fourCutCard: {
     borderRadius: 16,
     backgroundColor: '#fff',
@@ -572,13 +993,6 @@ const styles = StyleSheet.create({
       },
       android: { elevation: 3 },
     }),
-  },
-  shotTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: notebook.ink,
-    textAlign: 'center',
-    marginBottom: 14,
   },
   grid2x2: {
     gap: 10,
@@ -595,7 +1009,7 @@ const styles = StyleSheet.create({
   },
   emptySlotInner: {
     aspectRatio: 1,
-    borderRadius: 14,
+    borderRadius: 5,
     backgroundColor: '#f4f6f8',
     alignItems: 'center',
     justifyContent: 'center',
@@ -605,7 +1019,7 @@ const styles = StyleSheet.create({
   slotPolaroidInner: {
     aspectRatio: 1,
     width: '100%',
-    borderRadius: 14,
+    borderRadius: 5,
     borderWidth: 3,
     padding: 3,
     backgroundColor: '#fff',
@@ -623,7 +1037,7 @@ const styles = StyleSheet.create({
   slotImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 10,
+    borderRadius: 3,
   },
   plus: {
     fontSize: 28,
@@ -648,10 +1062,11 @@ const styles = StyleSheet.create({
   },
   polaroid: {
     width: '48%',
-    marginBottom: 4,
+    marginBottom: 8,
+    alignSelf: 'flex-start',
   },
   polaroidUnified: {
-    borderRadius: 14,
+    borderRadius: 5,
     borderWidth: 3,
     backgroundColor: '#fff',
     overflow: 'hidden',
@@ -673,7 +1088,7 @@ const styles = StyleSheet.create({
   polaroidArchivePhotoInner: {
     width: '100%',
     aspectRatio: 1,
-    borderRadius: 10,
+    borderRadius: 3,
     overflow: 'hidden',
     backgroundColor: '#f0f2f5',
   },
@@ -682,10 +1097,10 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   polaroidCaptionBar: {
-    justifyContent: 'center',
+    height: 54,
     paddingHorizontal: 10,
-    paddingVertical: 12,
-    minHeight: 48,
+    paddingVertical: 6,
+    justifyContent: 'center',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(15, 23, 42, 0.08)',
     opacity: 0.98,
@@ -695,26 +1110,31 @@ const styles = StyleSheet.create({
     margin: 0,
     backgroundColor: notebook.fabLight,
   },
-  modalKeyboardRoot: {
+  modalOverlay: {
     flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.4)',
   },
-  modalBackdrop: {
+  modalKeyboardLayer: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'center',
-    padding: 24,
+    justifyContent: 'flex-end',
+    backgroundColor: 'transparent',
   },
-  emotionModalInner: {
+  modalSheetOuter: {
     width: '100%',
-    maxWidth: '100%',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  emotionModalCard: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
   },
   emotionModalScroll: {
     width: '100%',
     maxWidth: '100%',
   },
   emotionModalScrollContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
+    paddingBottom: 16,
   },
   emotionSheet: {
     backgroundColor: '#fff',
@@ -747,27 +1167,36 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     marginBottom: 14,
   },
-  emotionGrid: {
+  emotionRowModal: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  emotionChip: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 999,
-    borderWidth: 2,
-    minWidth: '28%',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 4,
+    marginBottom: 4,
+    paddingHorizontal: 2,
   },
-  emotionChipSelected: {
-    borderWidth: 3,
-    transform: [{ scale: 1.02 }],
+  emotionCircleBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
   },
-  emotionChipLabel: {
-    fontSize: 14,
-    fontWeight: '700',
+  emotionCircleBtnSelected: {
+    borderWidth: 2.5,
+    transform: [{ scale: 1.06 }],
+    ...Platform.select({
+      ios: {
+        shadowColor: '#0f172a',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.12,
+        shadowRadius: 6,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
   },
   submitBtn: {
     marginTop: 16,
@@ -784,10 +1213,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  modalDeleteBtn: {
+    marginTop: 16,
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  modalDeleteText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#c45c5c',
+  },
   modalCancel: {
     marginTop: 12,
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 12,
+    paddingBottom: 4,
   },
   modalCancelText: {
     fontSize: 15,

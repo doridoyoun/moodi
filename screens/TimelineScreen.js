@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
   Calendar,
@@ -60,21 +60,21 @@ export default function TimelineScreen() {
     [selectedDate],
   );
 
-  const { height: windowHeight } = useWindowDimensions();
   const scrollRef = useRef(null);
   const hourYRef = useRef({});
   const hourRowHeightRef = useRef(54);
+  const scrollViewportHRef = useRef(0);
 
   const scrollToCurrentHour = useCallback(() => {
     if (!isToday) return;
     const h = new Date().getHours();
     const y = hourYRef.current[h];
     const rowH = hourRowHeightRef.current;
-    if (scrollRef.current == null || y == null) return;
-    const sh = windowHeight;
-    const targetY = y - sh / 2 + rowH / 2;
+    const vh = scrollViewportHRef.current;
+    if (scrollRef.current == null || y == null || vh <= 0) return;
+    const targetY = y - vh / 2 + rowH / 2;
     scrollRef.current.scrollTo({ y: Math.max(0, targetY), animated: false });
-  }, [isToday, windowHeight]);
+  }, [isToday]);
 
   useFocusEffect(
     useCallback(() => {
@@ -87,8 +87,12 @@ export default function TimelineScreen() {
 
   useEffect(() => {
     if (!isToday) return;
-    const t = setTimeout(scrollToCurrentHour, 120);
-    return () => clearTimeout(t);
+    const t1 = setTimeout(scrollToCurrentHour, 160);
+    const t2 = setTimeout(scrollToCurrentHour, 320);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
   }, [isToday, selectedDate, scrollToCurrentHour]);
 
   return (
@@ -120,7 +124,7 @@ export default function TimelineScreen() {
       }
     >
       <View style={styles.titleBlock}>
-        <Text style={styles.pageTitle}>⭐ Today's Mood Timeline</Text>
+        <Text style={styles.pageTitle}>{"⭐ Today's Mood Timeline"}</Text>
 
         <View style={styles.dateNav}>
           <Pressable
@@ -162,6 +166,9 @@ export default function TimelineScreen() {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator
+        onLayout={(e) => {
+          scrollViewportHRef.current = e.nativeEvent.layout.height;
+        }}
       >
         {HOURS.map((hour) => {
           const row = hourChunksMap[hour] ?? createEmptyChunks();
@@ -213,15 +220,26 @@ function clampChunkCount(n) {
   return Math.min(3, Math.max(1, c));
 }
 
+/** 짜증: ink(#7a2e1f)로 섞으면 갈색으로 치우침 → 코랄·오렌지레드 쪽만 진하게 */
+const ANNOYED_CORAL_MID = '#ff7a6b';
+const ANNOYED_CORAL_DEEP = '#ff5c4d';
+
 /** count 1~3: 테두리가 주 신호, 배경은 보조 (Context mergeChunkManual과 동일 상한) */
-function chunkIntensityVisuals(pal, count) {
+function chunkIntensityVisuals(pal, emotionId, count) {
   const level = clampChunkCount(count);
-  const borderColor =
-    level <= 1
-      ? pal.border
-      : level === 2
-        ? mixHex(pal.border, pal.ink, 0.3)
-        : mixHex(pal.border, pal.ink, 0.5);
+  let borderColor;
+  if (emotionId === 'annoyed') {
+    if (level <= 1) borderColor = pal.border;
+    else if (level === 2) borderColor = mixHex(pal.border, ANNOYED_CORAL_MID, 0.42);
+    else borderColor = mixHex(ANNOYED_CORAL_MID, ANNOYED_CORAL_DEEP, 0.55);
+  } else {
+    borderColor =
+      level <= 1
+        ? pal.border
+        : level === 2
+          ? mixHex(pal.border, pal.ink, 0.3)
+          : mixHex(pal.border, pal.ink, 0.5);
+  }
   const borderWidth = level <= 1 ? 1.5 : level === 2 ? 1.65 : 1.85;
   const fillOpacity = level <= 1 ? 0.12 : level === 2 ? 0.16 : 0.2;
   return { borderColor, borderWidth, fillOpacity };
@@ -232,7 +250,8 @@ function ChunkCell({ cell }) {
   const Icon = cell ? moodIcons[cell.emotionId] : null;
   const memo = cell?.memo?.trim();
   const filled = Boolean(cell && pal && Icon);
-  const intensity = filled && pal ? chunkIntensityVisuals(pal, cell.count) : null;
+  const intensity =
+    filled && pal ? chunkIntensityVisuals(pal, cell.emotionId, cell.count) : null;
 
   return (
     <View

@@ -40,6 +40,15 @@ function applyAlbumItemToTimelineSlot(prev, item) {
   return { ...prev, [dateKey]: { ...prevDay, [hour]: row } };
 }
 
+function clearAlbumFromTimeline(prev, item) {
+  const anchor = item.timelineAnchor ?? deriveTimelineAnchorFromTimestamp(item.timestamp);
+  const { dateKey, hour, chunk } = anchor;
+  const prevDay = prev[dateKey] ?? createEmptyHourMap();
+  const row = [...(prevDay[hour] ?? createEmptyChunks())];
+  row[chunk] = null;
+  return { ...prev, [dateKey]: { ...prevDay, [hour]: row } };
+}
+
 function mergeChunkCell(prevCell, emotionId, memoText) {
   const memo = (memoText || '').trim();
   if (!prevCell) {
@@ -164,6 +173,16 @@ export function MoodProvider({ children }) {
     }
   }, []);
 
+  const deleteAlbumItem = useCallback((id) => {
+    setAlbumItems((prevItems) => {
+      const item = prevItems.find((x) => x.id === id);
+      if (!item) return prevItems;
+      setTimelineByDate((prev) => clearAlbumFromTimeline(prev, item));
+      return prevItems.filter((x) => x.id !== id);
+    });
+    setFourSlotIds((prev) => prev.map((sid) => (sid === id ? null : sid)));
+  }, []);
+
   const setFourSlotAt = useCallback((index, albumId) => {
     setFourSlotIds((prev) => {
       const next = [...prev];
@@ -172,29 +191,37 @@ export function MoodProvider({ children }) {
     });
   }, []);
 
+  const clearAllFourSlots = useCallback(() => {
+    setFourSlotIds([null, null, null, null]);
+  }, []);
+
   const value = useMemo(
     () => ({
       timelineByDate,
       albumItems,
       fourSlotIds,
       setFourSlotAt,
+      clearAllFourSlots,
       selectedDate,
       setSelectedDate,
       shiftSelectedDateByDays,
       applyEmotionForCurrentHour,
       addAlbumItem,
       updateAlbumItem,
+      deleteAlbumItem,
     }),
     [
       timelineByDate,
       albumItems,
       fourSlotIds,
       setFourSlotAt,
+      clearAllFourSlots,
       selectedDate,
       shiftSelectedDateByDays,
       applyEmotionForCurrentHour,
       addAlbumItem,
       updateAlbumItem,
+      deleteAlbumItem,
     ],
   );
 
