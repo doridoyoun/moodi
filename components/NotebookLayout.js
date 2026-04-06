@@ -28,6 +28,7 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
+    paddingTop: 10,
   },
   footer: {
     borderTopWidth: StyleSheet.hairlineWidth,

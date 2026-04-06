@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
   Calendar,
@@ -31,12 +31,6 @@ const moodIcons = {
   annoyed: Flame,
 };
 
-function countToAlpha(count) {
-  if (count <= 1) return 0.3;
-  if (count === 2) return 0.6;
-  return 1.0;
-}
-
 export default function TimelineScreen() {
   const navigation = useNavigation();
   const {
@@ -66,16 +60,21 @@ export default function TimelineScreen() {
     [selectedDate],
   );
 
+  const { height: windowHeight } = useWindowDimensions();
   const scrollRef = useRef(null);
   const hourYRef = useRef({});
+  const hourRowHeightRef = useRef(54);
 
   const scrollToCurrentHour = useCallback(() => {
     if (!isToday) return;
     const h = new Date().getHours();
     const y = hourYRef.current[h];
+    const rowH = hourRowHeightRef.current;
     if (scrollRef.current == null || y == null) return;
-    scrollRef.current.scrollTo({ y: Math.max(0, y - 8), animated: false });
-  }, [isToday]);
+    const sh = windowHeight;
+    const targetY = y - sh / 2 + rowH / 2;
+    scrollRef.current.scrollTo({ y: Math.max(0, targetY), animated: false });
+  }, [isToday, windowHeight]);
 
   useFocusEffect(
     useCallback(() => {
@@ -171,7 +170,9 @@ export default function TimelineScreen() {
               key={hour}
               style={styles.hourRow}
               onLayout={(e) => {
-                hourYRef.current[hour] = e.nativeEvent.layout.y;
+                const { y, height } = e.nativeEvent.layout;
+                hourYRef.current[hour] = y;
+                hourRowHeightRef.current = height;
               }}
             >
               <Text style={styles.hourLabel}>
@@ -190,15 +191,61 @@ export default function TimelineScreen() {
   );
 }
 
+/** #RRGGBB 두 색을 t(0~1) 비율로 혼합 — 같은 톤 안에서 테두리만 살짝 진하게 */
+function mixHex(from, to, t) {
+  const p = (h) => {
+    const s = h.replace('#', '');
+    return [
+      parseInt(s.slice(0, 2), 16),
+      parseInt(s.slice(2, 4), 16),
+      parseInt(s.slice(4, 6), 16),
+    ];
+  };
+  const a = p(from);
+  const b = p(to);
+  const x = (i) => Math.round(a[i] + (b[i] - a[i]) * t);
+  const h = (n) => n.toString(16).padStart(2, '0');
+  return `#${h(x(0))}${h(x(1))}${h(x(2))}`;
+}
+
+function clampChunkCount(n) {
+  const c = typeof n === 'number' && Number.isFinite(n) ? Math.floor(n) : 1;
+  return Math.min(3, Math.max(1, c));
+}
+
+/** count 1~3: 테두리가 주 신호, 배경은 보조 (Context mergeChunkManual과 동일 상한) */
+function chunkIntensityVisuals(pal, count) {
+  const level = clampChunkCount(count);
+  const borderColor =
+    level <= 1
+      ? pal.border
+      : level === 2
+        ? mixHex(pal.border, pal.ink, 0.3)
+        : mixHex(pal.border, pal.ink, 0.5);
+  const borderWidth = level <= 1 ? 1.5 : level === 2 ? 1.65 : 1.85;
+  const fillOpacity = level <= 1 ? 0.12 : level === 2 ? 0.16 : 0.2;
+  return { borderColor, borderWidth, fillOpacity };
+}
+
 function ChunkCell({ cell }) {
   const pal = cell ? moodPalette[cell.emotionId] : null;
   const Icon = cell ? moodIcons[cell.emotionId] : null;
-  const fillOpacity = cell ? countToAlpha(cell.count) : 0;
   const memo = cell?.memo?.trim();
+  const filled = Boolean(cell && pal && Icon);
+  const intensity = filled && pal ? chunkIntensityVisuals(pal, cell.count) : null;
 
   return (
-    <View style={styles.chunk}>
-      {cell && pal && Icon ? (
+    <View
+      style={[
+        styles.chunk,
+        filled &&
+          intensity && {
+            borderWidth: intensity.borderWidth,
+            borderColor: intensity.borderColor,
+          },
+      ]}
+    >
+      {filled ? (
         <>
           <View
             pointerEvents="none"
@@ -207,7 +254,7 @@ function ChunkCell({ cell }) {
               {
                 borderRadius: 8,
                 backgroundColor: pal.bg,
-                opacity: fillOpacity,
+                opacity: intensity.fillOpacity,
               },
             ]}
           />
@@ -228,7 +275,7 @@ function ChunkCell({ cell }) {
 const styles = StyleSheet.create({
   titleBlock: {
     paddingHorizontal: 20,
-    paddingBottom: 12,
+    paddingBottom: 16,
   },
   pageTitle: {
     fontSize: 20,
@@ -239,7 +286,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 10,
+    marginTop: 14,
     paddingVertical: 4,
   },
   dateNavCenter: {
@@ -268,7 +315,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingBottom: 24,
+    paddingBottom: 40,
   },
   hourRow: {
     flexDirection: 'row',

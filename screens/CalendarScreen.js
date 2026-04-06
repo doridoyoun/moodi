@@ -184,13 +184,13 @@ const styles = StyleSheet.create({
   pagePad: {
     flexGrow: 1,
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 32,
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 18,
   },
   emoji: {
     fontSize: 18,

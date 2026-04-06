@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import {
   FlatList,
   Image,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -57,6 +58,66 @@ const memoTimeStyles = StyleSheet.create({
   },
   time: {
     fontSize: 10,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+    flexShrink: 0,
+  },
+});
+
+/** Archive 폴라로이드 전용 — Four-Cut은 MemoTimeCaption 유지 */
+function ArchiveMemoTimeCaption({ memo, timestamp, memoColor, timeColor }) {
+  const line = (memo || '').trim();
+  const time = formatTimeShort(timestamp);
+
+  if (!line) {
+    return (
+      <View style={archiveCaptionStyles.centeredStrip}>
+        <Text style={[archiveCaptionStyles.timeSolo, { color: timeColor }]}>{time}</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={archiveCaptionStyles.row}>
+      <Text
+        style={[archiveCaptionStyles.memo, { color: memoColor }]}
+        numberOfLines={2}
+      >
+        {line}
+      </Text>
+      <Text style={[archiveCaptionStyles.time, { color: timeColor }]}>{time}</Text>
+    </View>
+  );
+}
+
+const archiveCaptionStyles = StyleSheet.create({
+  centeredStrip: {
+    width: '100%',
+    minHeight: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 2,
+  },
+  timeSolo: {
+    fontSize: 11,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    width: '100%',
+  },
+  memo: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '500',
+    lineHeight: 16,
+  },
+  time: {
+    fontSize: 11,
     fontWeight: '600',
     fontVariant: ['tabular-nums'],
     flexShrink: 0,
@@ -254,57 +315,77 @@ export default function GalleryScreen() {
         animationType="fade"
         onRequestClose={resetEmotionModal}
       >
-        <Pressable style={styles.modalBackdrop} onPress={resetEmotionModal}>
-          <Pressable style={styles.emotionSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>
-              {editingAlbumId ? '폴라로이드 수정' : '메모와 감정을 남겨 주세요'}
-            </Text>
-            <TextInput
-              value={draftMemo}
-              onChangeText={setDraftMemo}
-              placeholder="짧은 메모..."
-              placeholderTextColor={notebook.inkLight}
-              maxLength={120}
-              multiline
-              style={styles.memoField}
-            />
-            <Text style={styles.modalSub}>감정 선택</Text>
-            <View style={styles.emotionGrid}>
-              {moodOrder.map((id) => {
-                const m = moodPalette[id];
-                const selected = pickedEmotion === id;
-                return (
+        <KeyboardAvoidingView
+          style={styles.modalKeyboardRoot}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
+        >
+          <Pressable style={styles.modalBackdrop} onPress={resetEmotionModal}>
+            <Pressable style={styles.emotionModalInner} onPress={(e) => e.stopPropagation()}>
+              <ScrollView
+                style={styles.emotionModalScroll}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+                bounces={false}
+                nestedScrollEnabled
+                contentContainerStyle={[
+                  styles.emotionModalScrollContent,
+                  { paddingBottom: Math.max(16, insets.bottom + 12) },
+                ]}
+              >
+                <View style={styles.emotionSheet}>
+                  <Text style={styles.modalTitle}>
+                    {editingAlbumId ? '폴라로이드 수정' : '메모와 감정을 남겨 주세요'}
+                  </Text>
+                  <TextInput
+                    value={draftMemo}
+                    onChangeText={setDraftMemo}
+                    placeholder="짧은 메모..."
+                    placeholderTextColor={notebook.inkLight}
+                    maxLength={120}
+                    multiline
+                    style={styles.memoField}
+                  />
+                  <Text style={styles.modalSub}>감정 선택</Text>
+                  <View style={styles.emotionGrid}>
+                    {moodOrder.map((id) => {
+                      const m = moodPalette[id];
+                      const selected = pickedEmotion === id;
+                      return (
+                        <Pressable
+                          key={id}
+                          onPress={() => setPickedEmotion(id)}
+                          style={({ pressed }) => [
+                            styles.emotionChip,
+                            { backgroundColor: m.bg, borderColor: m.border },
+                            selected && styles.emotionChipSelected,
+                            pressed && { opacity: 0.88 },
+                          ]}
+                        >
+                          <Text style={[styles.emotionChipLabel, { color: m.ink }]}>{m.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
                   <Pressable
-                    key={id}
-                    onPress={() => setPickedEmotion(id)}
+                    onPress={submitAlbumEntry}
+                    disabled={!pickedEmotion}
                     style={({ pressed }) => [
-                      styles.emotionChip,
-                      { backgroundColor: m.bg, borderColor: m.border },
-                      selected && styles.emotionChipSelected,
-                      pressed && { opacity: 0.88 },
+                      styles.submitBtn,
+                      !pickedEmotion && styles.submitBtnDisabled,
+                      pressed && pickedEmotion && { opacity: 0.9 },
                     ]}
                   >
-                    <Text style={[styles.emotionChipLabel, { color: m.ink }]}>{m.label}</Text>
+                    <Text style={styles.submitBtnText}>{editingAlbumId ? '저장' : '앨범에 추가'}</Text>
                   </Pressable>
-                );
-              })}
-            </View>
-            <Pressable
-              onPress={submitAlbumEntry}
-              disabled={!pickedEmotion}
-              style={({ pressed }) => [
-                styles.submitBtn,
-                !pickedEmotion && styles.submitBtnDisabled,
-                pressed && pickedEmotion && { opacity: 0.9 },
-              ]}
-            >
-              <Text style={styles.submitBtnText}>{editingAlbumId ? '저장' : '앨범에 추가'}</Text>
-            </Pressable>
-            <Pressable onPress={resetEmotionModal} style={styles.modalCancel}>
-              <Text style={styles.modalCancelText}>취소</Text>
+                  <Pressable onPress={resetEmotionModal} style={styles.modalCancel}>
+                    <Text style={styles.modalCancelText}>취소</Text>
+                  </Pressable>
+                </View>
+              </ScrollView>
             </Pressable>
           </Pressable>
-        </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal
@@ -408,24 +489,26 @@ function AlbumPolaroid({ item, onPress }) {
     >
       <View
         style={[
-          styles.polaroidFrame,
+          styles.polaroidUnified,
           {
             borderColor: pal.border,
             shadowColor: pal.border,
           },
         ]}
       >
-        <View style={styles.polaroidPhotoInner}>
-          <Image source={{ uri: item.imageUri }} style={styles.polaroidImage} resizeMode="cover" />
+        <View style={styles.polaroidPhotoSection}>
+          <View style={styles.polaroidArchivePhotoInner}>
+            <Image source={{ uri: item.imageUri }} style={styles.polaroidImage} resizeMode="cover" />
+          </View>
         </View>
-      </View>
-      <View style={[styles.polaroidCaptionBar, { backgroundColor: pal.bg }]}>
-        <MemoTimeCaption
-          memo={item.memo}
-          timestamp={item.timestamp}
-          memoColor={pal.ink}
-          timeColor={notebook.inkMuted}
-        />
+        <View style={[styles.polaroidCaptionBar, { backgroundColor: pal.bg }]}>
+          <ArchiveMemoTimeCaption
+            memo={item.memo}
+            timestamp={item.timestamp}
+            memoColor={pal.ink}
+            timeColor={notebook.inkMuted}
+          />
+        </View>
       </View>
     </Pressable>
   );
@@ -438,13 +521,13 @@ const styles = StyleSheet.create({
   pagePad: {
     flexGrow: 1,
     paddingHorizontal: 20,
-    paddingBottom: 100,
+    paddingBottom: 112,
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 16,
+    marginBottom: 18,
   },
   emoji: {
     fontSize: 18,
@@ -455,7 +538,7 @@ const styles = StyleSheet.create({
     color: notebook.ink,
   },
   sectionLabel: {
-    marginBottom: 10,
+    marginBottom: 12,
   },
   sectionKicker: {
     fontSize: 11,
@@ -479,7 +562,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: '#fff',
     padding: 16,
-    marginBottom: 24,
+    marginBottom: 28,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -548,7 +631,7 @@ const styles = StyleSheet.create({
     fontWeight: '300',
   },
   archiveHeader: {
-    marginBottom: 12,
+    marginBottom: 14,
   },
   emptyArchive: {
     fontSize: 14,
@@ -567,11 +650,11 @@ const styles = StyleSheet.create({
     width: '48%',
     marginBottom: 4,
   },
-  polaroidFrame: {
+  polaroidUnified: {
     borderRadius: 14,
     borderWidth: 3,
-    padding: 4,
     backgroundColor: '#fff',
+    overflow: 'hidden',
     ...Platform.select({
       ios: {
         shadowOffset: { width: 0, height: 3 },
@@ -581,7 +664,13 @@ const styles = StyleSheet.create({
       android: { elevation: 3 },
     }),
   },
-  polaroidPhotoInner: {
+  polaroidPhotoSection: {
+    paddingHorizontal: 10,
+    paddingTop: 10,
+    paddingBottom: 8,
+    backgroundColor: '#fff',
+  },
+  polaroidArchivePhotoInner: {
     width: '100%',
     aspectRatio: 1,
     borderRadius: 10,
@@ -593,10 +682,12 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   polaroidCaptionBar: {
-    minHeight: 48,
     justifyContent: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+    minHeight: 48,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(15, 23, 42, 0.08)',
     opacity: 0.98,
   },
   fab: {
@@ -604,11 +695,26 @@ const styles = StyleSheet.create({
     margin: 0,
     backgroundColor: notebook.fabLight,
   },
+  modalKeyboardRoot: {
+    flex: 1,
+  },
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'center',
     padding: 24,
+  },
+  emotionModalInner: {
+    width: '100%',
+    maxWidth: '100%',
+  },
+  emotionModalScroll: {
+    width: '100%',
+    maxWidth: '100%',
+  },
+  emotionModalScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
   },
   emotionSheet: {
     backgroundColor: '#fff',
