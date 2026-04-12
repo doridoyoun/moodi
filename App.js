@@ -1,11 +1,15 @@
+import { useCallback, useEffect, useState } from 'react';
+import { View } from 'react-native';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { MD3LightTheme, PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import MainTabs from './navigation/MainTabs';
+import OnboardingScreen from './screens/OnboardingScreen';
 import { MemoFontProvider } from './src/context/MemoFontContext';
 import { MoodProvider } from './src/context/MoodContext';
 import { notebook } from './constants/theme';
+import { getHasCompletedOnboarding, setOnboardingComplete } from './storage/onboardingStorage';
 
 const navTheme = {
   ...DefaultTheme,
@@ -31,16 +35,51 @@ const paperTheme = {
   },
 };
 
+function AppContent() {
+  const [hydrated, setHydrated] = useState(false);
+  const [onboardingDone, setOnboardingDone] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    getHasCompletedOnboarding().then((done) => {
+      if (!cancelled) {
+        setOnboardingDone(done);
+        setHydrated(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const completeOnboarding = useCallback(async () => {
+    await setOnboardingComplete();
+    setOnboardingDone(true);
+  }, []);
+
+  if (!hydrated) {
+    return <View style={{ flex: 1, backgroundColor: notebook.bg }} />;
+  }
+
+  if (!onboardingDone) {
+    return <OnboardingScreen onComplete={completeOnboarding} />;
+  }
+
+  return (
+    <NavigationContainer theme={navTheme}>
+      <StatusBar style="dark" />
+      <MainTabs />
+    </NavigationContainer>
+  );
+}
+
 export default function App() {
   return (
     <SafeAreaProvider>
       <PaperProvider theme={paperTheme}>
         <MoodProvider>
           <MemoFontProvider>
-            <NavigationContainer theme={navTheme}>
-              <StatusBar style="dark" />
-              <MainTabs />
-            </NavigationContainer>
+            <AppContent />
           </MemoFontProvider>
         </MoodProvider>
       </PaperProvider>

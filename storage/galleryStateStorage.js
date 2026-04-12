@@ -1,3 +1,7 @@
+/**
+ * @deprecated Legacy split storage (`moodi_gallery_state_v1`). Active app code reads/writes unified mood state
+ * in `src/storage/mood/moodStorage.js`. This file remains for migration only (`src/migrations/moodStateMigration.js`).
+ */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /** @type {string} 나중에 스키마 변경 시 버전 키만 올리면 됨 */

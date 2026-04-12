@@ -9,11 +9,16 @@ import { useMood } from '../src/context/MoodContext';
 import { moodOrder, moodPalette, notebook } from '../constants/theme';
 import {
   computeTopTwoEmotionIdsFromEntries,
+  getEntriesForDate,
   parseDateKey,
   toDateKey,
 } from '../storage/timelineStateStorage';
-import { CALENDAR_INSIGHT_PLACEHOLDER, getCalendarInsight } from '../utils/calendarInsight';
 import { emotionBgSequenceForDay } from '../utils/monthlyFlowHelpers';
+import {
+  getMoodiFeedback,
+  getMoodEntriesRecentDays,
+  moodiFeedbackRecordsFromMoodEntries,
+} from '../utils/moodiCalendarFeedback';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -82,7 +87,20 @@ export default function CalendarScreen() {
     [entries, selectedDate],
   );
 
-  const patternInsightLine = useMemo(() => getCalendarInsight(entries), [entries]);
+  const selectedDateRecords = useMemo(
+    () => moodiFeedbackRecordsFromMoodEntries(getEntriesForDate(entries, selectedDate)),
+    [entries, selectedDate],
+  );
+
+  const recentRecords = useMemo(
+    () => moodiFeedbackRecordsFromMoodEntries(getMoodEntriesRecentDays(entries, 7)),
+    [entries],
+  );
+
+  const feedbackLine = useMemo(
+    () => getMoodiFeedback(selectedDateRecords, recentRecords),
+    [selectedDateRecords, recentRecords],
+  );
 
   const shiftMonth = (delta) => {
     setCursor((d) => new Date(d.getFullYear(), d.getMonth() + delta, 1));
@@ -221,9 +239,9 @@ export default function CalendarScreen() {
             </View>
           </View>
 
-          <View style={styles.patternInsightBlock}>
-            <Text style={styles.patternInsightText} numberOfLines={1}>
-              {patternInsightLine ?? CALENDAR_INSIGHT_PLACEHOLDER}
+          <View style={styles.feedbackBlock}>
+            <Text style={styles.feedbackText} numberOfLines={2}>
+              {feedbackLine}
             </Text>
           </View>
 
@@ -395,13 +413,13 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.08)',
   },
-  patternInsightBlock: {
+  feedbackBlock: {
     marginTop: 14,
     paddingTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: notebook.gridLine,
   },
-  patternInsightText: {
+  feedbackText: {
     fontSize: 13,
     lineHeight: 19,
     fontWeight: '500',

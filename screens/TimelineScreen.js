@@ -32,6 +32,10 @@ import NotebookLayout from '../components/NotebookLayout';
 import { useMood } from '../src/context/MoodContext';
 import { moodOrder, moodPalette, notebook, timelineSlotOverrides } from '../constants/theme';
 import { formatDateKeyForDisplay, getEntriesForDate, toDateKey } from '../storage/timelineStateStorage';
+import {
+  markFirstEmotionRecorded,
+  shouldShowFirstEmotionGuidance,
+} from '../storage/firstEmotionGuidanceStorage';
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
@@ -154,6 +158,13 @@ export default function TimelineScreen() {
   const emotionToastTimerRef = useRef(null);
   const [emotionToastText, setEmotionToastText] = useState(null);
 
+  const [firstGuideActive, setFirstGuideActive] = useState(false);
+  const firstGuideActiveRef = useRef(false);
+  const [firstFollowUpVisible, setFirstFollowUpVisible] = useState(false);
+  const firstFollowUpEntryIdRef = useRef(null);
+  const pulseScale = useRef(new Animated.Value(1)).current;
+  const pulseLoopRef = useRef(null);
+
   const flashEmotionToast = useCallback((message) => {
     if (emotionToastTimerRef.current) {
       clearTimeout(emotionToastTimerRef.current);
@@ -165,6 +176,20 @@ export default function TimelineScreen() {
       emotionToastTimerRef.current = null;
     }, 1800);
   }, []);
+
+  useEffect(() => {
+    firstGuideActiveRef.current = firstGuideActive;
+  }, [firstGuideActive]);
+
+  useEffect(() => {
+    let cancelled = false;
+    shouldShowFirstEmotionGuidance(entries.length).then((show) => {
+      if (!cancelled) setFirstGuideActive(show);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [entries.length]);
 
   const todayKey = toDateKey(new Date());
   const isToday = selectedDate === todayKey;
@@ -192,6 +217,31 @@ export default function TimelineScreen() {
   useEffect(() => {
     setSelectedTimelineHour(null);
   }, [selectedDate]);
+
+  useEffect(() => {
+    if (!firstGuideActive || !isToday || isFutureDateView) {
+      pulseScale.setValue(1);
+      if (pulseLoopRef.current) {
+        pulseLoopRef.current.stop();
+        pulseLoopRef.current = null;
+      }
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseScale, { toValue: 1.05, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulseScale, { toValue: 1, duration: 1000, useNativeDriver: true }),
+      ]),
+    );
+    pulseLoopRef.current = loop;
+    loop.start();
+    return () => {
+      loop.stop();
+      pulseLoopRef.current = null;
+      pulseScale.setValue(1);
+    };
+  }, [firstGuideActive, isToday, isFutureDateView, pulseScale]);
+
 
   const detailEntry = useMemo(
     () => (detailEntryId ? entries.find((e) => e.id === detailEntryId) ?? null : null),
@@ -357,6 +407,15 @@ export default function TimelineScreen() {
     (emotionId) => {
       if (isFutureDateView) return;
 
+      const handleFirstGuideSuccess = (entry) => {
+        void markFirstEmotionRecorded();
+        setFirstGuideActive(false);
+        firstGuideActiveRef.current = false;
+        flashEmotionToast('감정이 기록됐어요');
+        firstFollowUpEntryIdRef.current = entry.id;
+        setFirstFollowUpVisible(true);
+      };
+
       if (selectedTimelineHour !== null) {
         const hour = selectedTimelineHour;
         if (!canSelectHour(hour)) {
@@ -370,6 +429,11 @@ export default function TimelineScreen() {
           hour,
         });
         if (entry?.id) {
+          if (firstGuideActiveRef.current) {
+            handleFirstGuideSuccess(entry);
+            setSelectedTimelineHour(null);
+            return;
+          }
           const dk = selectedDate;
           const dayList = [...getEntriesForDate(entries, dk), entry].sort(
             (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
@@ -398,6 +462,10 @@ export default function TimelineScreen() {
           hour,
         });
         if (entry?.id) {
+          if (firstGuideActiveRef.current) {
+            handleFirstGuideSuccess(entry);
+            return;
+          }
           const dk = todayKey;
           const dayList = [...getEntriesForDate(entries, dk), entry].sort(
             (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
@@ -521,15 +589,54 @@ export default function TimelineScreen() {
                 : '시간대를 선택한 뒤 감정을 눌러 그날의 기분을 남겨요'}
             </Text>
           </View>
+          {firstGuideActive && isToday && !isFutureDateView ? (
+            <Text style={styles.firstGuideHint}>오늘의 감정을 가볍게 남겨보세요</Text>
+          ) : null}
           {emotionToastText ? (
             <View style={styles.emotionToastBanner} accessibilityLiveRegion="polite">
               <Text style={styles.emotionToastText}>{emotionToastText}</Text>
             </View>
           ) : null}
-          <View
+          {firstFollowUpVisible ? (
+            <View style={styles.firstFollowRow}>
+              <Text style={styles.firstFollowQuestion}>이 순간을 조금 더 남겨볼까요?</Text>
+              <View style={styles.firstFollowActions}>
+                <Pressable
+                  onPress={() => {
+                    const id = firstFollowUpEntryIdRef.current;
+                    setFirstFollowUpVisible(false);
+                    if (!id) return;
+                    if (memoPromptTimerRef.current) {
+                      clearTimeout(memoPromptTimerRef.current);
+                    }
+                    setMemoPromptEntryId(id);
+                    memoPromptTimerRef.current = setTimeout(() => {
+                      memoPromptTimerRef.current = null;
+                      setMemoPromptEntryId((cur) => (cur === id ? null : cur));
+                    }, 3000);
+                  }}
+                  style={({ pressed }) => [styles.firstFollowBtn, pressed && { opacity: 0.8 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="남기기"
+                >
+                  <Text style={styles.firstFollowBtnText}>남기기</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setFirstFollowUpVisible(false)}
+                  style={({ pressed }) => [styles.firstFollowBtnSecondary, pressed && { opacity: 0.75 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="나중에"
+                >
+                  <Text style={styles.firstFollowBtnSecondaryText}>나중에</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+          <Animated.View
             style={[
               styles.quickEmotionRow,
               isFutureDateView && styles.quickEmotionRowDisabled,
+              firstGuideActive && isToday && !isFutureDateView ? { transform: [{ scale: pulseScale }] } : null,
             ]}
           >
             {moodOrder.map((key) => {
@@ -553,7 +660,7 @@ export default function TimelineScreen() {
                 </Pressable>
               );
             })}
-          </View>
+          </Animated.View>
         </View>
       }
     >
@@ -1225,6 +1332,57 @@ const styles = StyleSheet.create({
     color: notebook.inkMuted,
     textAlign: 'center',
     lineHeight: 18,
+  },
+  firstGuideHint: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: notebook.inkMuted,
+    textAlign: 'center',
+    marginBottom: 10,
+    lineHeight: 19,
+  },
+  firstFollowRow: {
+    alignSelf: 'stretch',
+    marginBottom: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.88)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.06)',
+  },
+  firstFollowQuestion: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: notebook.inkMuted,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  firstFollowActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+  },
+  firstFollowBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: 'rgba(79, 70, 229, 0.1)',
+  },
+  firstFollowBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4f46e5',
+  },
+  firstFollowBtnSecondary: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  firstFollowBtnSecondaryText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: notebook.inkLight,
   },
   footerWrap: {
     paddingHorizontal: 12,

@@ -377,6 +377,7 @@ function buildLegacyHourMapFromDayEntries(dayEntries) {
 
 /**
  * Bridge: entry list → legacy timeline shape for existing UI.
+ * Callers should import via `src/domain/mood/legacyTimelineBridge.js` so this stays a compatibility seam.
  * @param {MoodEntry[]} entries
  * @returns {TimelineByDate}
  */
