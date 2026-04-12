@@ -4,12 +4,50 @@ import {
   loadTimelineByDate,
   migrateLegacyTimelineByDateToEntries,
   normalizeMoodEntries,
+  toDateKey,
 } from './timelineStateStorage';
 
 const UNIFIED_KEY_V2 = 'moodi_unified_state_v2';
 const UNIFIED_KEY_V1 = 'moodi_unified_state_v1';
 
+/**
+ * @param {unknown} raw
+ * @returns {Record<string, { todayToastCount: number, shownToastTypes: string[], lastToastAt: string | null }>}
+ */
+function normalizeEmotionToastByDate(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  /** @type {Record<string, { todayToastCount: number, shownToastTypes: string[], lastToastAt: string | null }>} */
+  const out = {};
+  for (const [key, val] of Object.entries(raw)) {
+    if (typeof key !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(key.trim())) continue;
+    const k = key.trim();
+    if (!val || typeof val !== 'object') continue;
+    const v = /** @type {Record<string, unknown>} */ (val);
+    const count = typeof v.todayToastCount === 'number' && v.todayToastCount >= 0 ? v.todayToastCount : 0;
+    const shown = Array.isArray(v.shownToastTypes)
+      ? v.shownToastTypes.filter((x) => typeof x === 'string')
+      : [];
+    let last = null;
+    if (typeof v.lastToastAt === 'string' && !Number.isNaN(Date.parse(v.lastToastAt))) {
+      last = v.lastToastAt;
+    }
+    out[k] = { todayToastCount: count, shownToastTypes: shown, lastToastAt: last };
+  }
+  return out;
+}
+
 const EMPTY_FOUR = [null, null, null, null];
+
+const INNER_FRAME_LEGACY_KEY = 'moodiGalleryInnerFrameColor';
+const VALID_INNER_FRAME_KEYS = new Set([
+  'white',
+  'black',
+  'happy',
+  'flutter',
+  'calm',
+  'gloom',
+  'annoyed',
+]);
 
 function safeAlbumItems(arr) {
   if (!Array.isArray(arr)) return [];
@@ -43,8 +81,34 @@ function safeFour(arr) {
   return [...arr];
 }
 
+function normalizeInnerFrameKey(raw) {
+  if (typeof raw === 'string' && VALID_INNER_FRAME_KEYS.has(raw)) return raw;
+  return 'white';
+}
+
 /**
- * @returns {Promise<{ entries: object[], albumItems: object[], fourSlotIds: (string|null)[], moodiDaySummary: string }>}
+ * @param {unknown} raw
+ * @returns {Record<string, { fourSlotIds: (string|null)[], moodiDaySummary: string, innerFrameColorKey: string }>}
+ */
+export function normalizeGalleryByDate(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  /** @type {Record<string, { fourSlotIds: (string|null)[], moodiDaySummary: string, innerFrameColorKey: string }>} */
+  const out = {};
+  for (const [key, val] of Object.entries(raw)) {
+    if (typeof key !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(key.trim())) continue;
+    const k = key.trim();
+    if (!val || typeof val !== 'object') continue;
+    out[k] = {
+      fourSlotIds: safeFour(val.fourSlotIds),
+      moodiDaySummary: typeof val.moodiDaySummary === 'string' ? val.moodiDaySummary : '',
+      innerFrameColorKey: normalizeInnerFrameKey(val.innerFrameColorKey),
+    };
+  }
+  return out;
+}
+
+/**
+ * @returns {Promise<{ entries: object[], albumItems: object[], galleryByDate: Record<string, { fourSlotIds: (string|null)[], moodiDaySummary: string, innerFrameColorKey: string }>, emotionToastByDate: Record<string, { todayToastCount: number, shownToastTypes: string[], lastToastAt: string | null }> }>}
  */
 export async function loadMoodPersistedState() {
   try {
@@ -52,11 +116,35 @@ export async function loadMoodPersistedState() {
     if (rawV2) {
       const p = JSON.parse(rawV2);
       const entries = normalizeMoodEntries(p.entries);
+      let galleryByDate = normalizeGalleryByDate(p.galleryByDate);
+      const hasPerDay = p.galleryByDate && typeof p.galleryByDate === 'object';
+
+      if (!hasPerDay || Object.keys(galleryByDate).length === 0) {
+        const todayKey = toDateKey(new Date());
+        let frameKey = 'white';
+        try {
+          const legacyFrame = await AsyncStorage.getItem(INNER_FRAME_LEGACY_KEY);
+          if (typeof legacyFrame === 'string' && VALID_INNER_FRAME_KEYS.has(legacyFrame)) {
+            frameKey = legacyFrame;
+          }
+        } catch {
+          /* ignore */
+        }
+        galleryByDate = {
+          ...galleryByDate,
+          [todayKey]: {
+            fourSlotIds: safeFour(p.fourSlotIds),
+            moodiDaySummary: typeof p.moodiDaySummary === 'string' ? p.moodiDaySummary : '',
+            innerFrameColorKey: frameKey,
+          },
+        };
+      }
+
       return {
         entries,
         albumItems: safeAlbumItems(p.albumItems),
-        fourSlotIds: safeFour(p.fourSlotIds),
-        moodiDaySummary: typeof p.moodiDaySummary === 'string' ? p.moodiDaySummary : '',
+        galleryByDate,
+        emotionToastByDate: normalizeEmotionToastByDate(p.emotionToastByDate),
       };
     }
   } catch {
@@ -73,11 +161,27 @@ export async function loadMoodPersistedState() {
       } else if (p.timelineByDate && typeof p.timelineByDate === 'object') {
         entries = migrateLegacyTimelineByDateToEntries(p.timelineByDate);
       }
+      const todayKey = toDateKey(new Date());
+      let frameKey = 'white';
+      try {
+        const legacyFrame = await AsyncStorage.getItem(INNER_FRAME_LEGACY_KEY);
+        if (typeof legacyFrame === 'string' && VALID_INNER_FRAME_KEYS.has(legacyFrame)) {
+          frameKey = legacyFrame;
+        }
+      } catch {
+        /* ignore */
+      }
       return {
         entries,
         albumItems: safeAlbumItems(p.albumItems),
-        fourSlotIds: safeFour(p.fourSlotIds),
-        moodiDaySummary: typeof p.moodiDaySummary === 'string' ? p.moodiDaySummary : '',
+        galleryByDate: {
+          [todayKey]: {
+            fourSlotIds: safeFour(p.fourSlotIds),
+            moodiDaySummary: typeof p.moodiDaySummary === 'string' ? p.moodiDaySummary : '',
+            innerFrameColorKey: frameKey,
+          },
+        },
+        emotionToastByDate: {},
       };
     }
   } catch {
@@ -91,31 +195,47 @@ export async function loadMoodPersistedState() {
   );
 
   const migratedAlbum = safeAlbumItems(gallery.albumItems || []);
+  const todayKey = toDateKey(new Date());
+  let frameKey = 'white';
+  try {
+    const legacyFrame = await AsyncStorage.getItem(INNER_FRAME_LEGACY_KEY);
+    if (typeof legacyFrame === 'string' && VALID_INNER_FRAME_KEYS.has(legacyFrame)) {
+      frameKey = legacyFrame;
+    }
+  } catch {
+    /* ignore */
+  }
 
   return {
     entries,
     albumItems: migratedAlbum,
-    fourSlotIds: safeFour(gallery.fourSlotIds),
-    moodiDaySummary: '',
+    galleryByDate: {
+      [todayKey]: {
+        fourSlotIds: safeFour(gallery.fourSlotIds),
+        moodiDaySummary: '',
+        innerFrameColorKey: frameKey,
+      },
+    },
+    emotionToastByDate: {},
   };
 }
 
 /**
- * @param {{ entries: object[], albumItems: object[], fourSlotIds: (string|null)[], moodiDaySummary: string }} state
+ * @param {{ entries: object[], albumItems: object[], galleryByDate: Record<string, unknown>, emotionToastByDate?: Record<string, unknown> }} state
  */
 export async function saveMoodPersistedState(state) {
   const normalizedEntries = normalizeMoodEntries(state.entries || []);
   const safeAlbum = safeAlbumItems(state.albumItems || []);
-  const four = safeFour(state.fourSlotIds);
-  const summary = typeof state.moodiDaySummary === 'string' ? state.moodiDaySummary : '';
+  const galleryByDate = normalizeGalleryByDate(state.galleryByDate);
+  const emotionToastByDate = normalizeEmotionToastByDate(state.emotionToastByDate);
 
   await AsyncStorage.setItem(
     UNIFIED_KEY_V2,
     JSON.stringify({
       entries: normalizedEntries,
       albumItems: safeAlbum,
-      fourSlotIds: four,
-      moodiDaySummary: summary,
+      galleryByDate,
+      emotionToastByDate,
     }),
   );
 }

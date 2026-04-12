@@ -14,7 +14,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
@@ -31,7 +31,7 @@ import {
 import NotebookLayout from '../components/NotebookLayout';
 import { useMood } from '../src/context/MoodContext';
 import { moodOrder, moodPalette, notebook, timelineSlotOverrides } from '../constants/theme';
-import { formatDateKeyForDisplay, toDateKey } from '../storage/timelineStateStorage';
+import { formatDateKeyForDisplay, getEntriesForDate, toDateKey } from '../storage/timelineStateStorage';
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
@@ -125,6 +125,7 @@ const moodIcons = {
 
 export default function TimelineScreen() {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const {
     entries,
     selectedDate,
@@ -133,6 +134,7 @@ export default function TimelineScreen() {
     createEntry,
     updateEntry,
     deleteEntry,
+    registerEmotionToastAfterLog,
   } = useMood();
 
   const [activeHour, setActiveHour] = useState(null);
@@ -143,13 +145,53 @@ export default function TimelineScreen() {
   const [detailEditTitle, setDetailEditTitle] = useState('');
   const [detailEditContent, setDetailEditContent] = useState('');
   const [memoPromptEntryId, setMemoPromptEntryId] = useState(null);
+  /** UI-only: hour row targeted for next quick emotion (not persisted). */
+  const [selectedTimelineHour, setSelectedTimelineHour] = useState(null);
 
   const overlayFade = useRef(new Animated.Value(0)).current;
   const overlaySlide = useRef(new Animated.Value(10)).current;
   const memoPromptTimerRef = useRef(null);
+  const emotionToastTimerRef = useRef(null);
+  const [emotionToastText, setEmotionToastText] = useState(null);
+
+  const flashEmotionToast = useCallback((message) => {
+    if (emotionToastTimerRef.current) {
+      clearTimeout(emotionToastTimerRef.current);
+      emotionToastTimerRef.current = null;
+    }
+    setEmotionToastText(message);
+    emotionToastTimerRef.current = setTimeout(() => {
+      setEmotionToastText(null);
+      emotionToastTimerRef.current = null;
+    }, 1800);
+  }, []);
 
   const todayKey = toDateKey(new Date());
   const isToday = selectedDate === todayKey;
+  const isFutureDateView = selectedDate > todayKey;
+  const currentRealHour = new Date().getHours();
+
+  const canSelectHour = useCallback(
+    (hour) => {
+      if (isFutureDateView) return false;
+      if (selectedDate < todayKey) return true;
+      if (selectedDate === todayKey) return hour <= currentRealHour;
+      return false;
+    },
+    [currentRealHour, isFutureDateView, selectedDate, todayKey],
+  );
+
+  const onPressHourSlot = useCallback(
+    (hour) => {
+      if (!canSelectHour(hour)) return;
+      setSelectedTimelineHour((prev) => (prev === hour ? null : hour));
+    },
+    [canSelectHour],
+  );
+
+  useEffect(() => {
+    setSelectedTimelineHour(null);
+  }, [selectedDate]);
 
   const detailEntry = useMemo(
     () => (detailEntryId ? entries.find((e) => e.id === detailEntryId) ?? null : null),
@@ -313,32 +355,90 @@ export default function TimelineScreen() {
 
   const onQuickEmotion = useCallback(
     (emotionId) => {
-      if (!isToday) return;
-      const hour = new Date().getHours();
-      const entry = createEntry({
-        emotionId,
-        memo: '',
-        dateKey: todayKey,
-        hour,
-      });
-      if (entry?.id) {
-        if (memoPromptTimerRef.current) {
-          clearTimeout(memoPromptTimerRef.current);
+      if (isFutureDateView) return;
+
+      if (selectedTimelineHour !== null) {
+        const hour = selectedTimelineHour;
+        if (!canSelectHour(hour)) {
+          setSelectedTimelineHour(null);
+          return;
         }
-        setMemoPromptEntryId(entry.id);
-        memoPromptTimerRef.current = setTimeout(() => {
-          memoPromptTimerRef.current = null;
-          setMemoPromptEntryId((cur) => (cur === entry.id ? null : cur));
-        }, 3000);
+        const entry = createEntry({
+          emotionId,
+          memo: '',
+          dateKey: selectedDate,
+          hour,
+        });
+        if (entry?.id) {
+          const dk = selectedDate;
+          const dayList = [...getEntriesForDate(entries, dk), entry].sort(
+            (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
+          );
+          const toastMsg = registerEmotionToastAfterLog(dk, dayList);
+          if (toastMsg) flashEmotionToast(toastMsg);
+          setSelectedTimelineHour(null);
+          if (memoPromptTimerRef.current) {
+            clearTimeout(memoPromptTimerRef.current);
+          }
+          setMemoPromptEntryId(entry.id);
+          memoPromptTimerRef.current = setTimeout(() => {
+            memoPromptTimerRef.current = null;
+            setMemoPromptEntryId((cur) => (cur === entry.id ? null : cur));
+          }, 3000);
+        }
+        return;
       }
+
+      if (isToday) {
+        const hour = new Date().getHours();
+        const entry = createEntry({
+          emotionId,
+          memo: '',
+          dateKey: todayKey,
+          hour,
+        });
+        if (entry?.id) {
+          const dk = todayKey;
+          const dayList = [...getEntriesForDate(entries, dk), entry].sort(
+            (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
+          );
+          const toastMsg = registerEmotionToastAfterLog(dk, dayList);
+          if (toastMsg) flashEmotionToast(toastMsg);
+          if (memoPromptTimerRef.current) {
+            clearTimeout(memoPromptTimerRef.current);
+          }
+          setMemoPromptEntryId(entry.id);
+          memoPromptTimerRef.current = setTimeout(() => {
+            memoPromptTimerRef.current = null;
+            setMemoPromptEntryId((cur) => (cur === entry.id ? null : cur));
+          }, 3000);
+        }
+        return;
+      }
+
+      Alert.alert('', '기록할 시간대를 먼저 선택해주세요');
     },
-    [createEntry, isToday, todayKey],
+    [
+      canSelectHour,
+      createEntry,
+      entries,
+      flashEmotionToast,
+      isFutureDateView,
+      isToday,
+      registerEmotionToastAfterLog,
+      selectedDate,
+      selectedTimelineHour,
+      todayKey,
+    ],
   );
 
   useEffect(
     () => () => {
       if (memoPromptTimerRef.current) {
         clearTimeout(memoPromptTimerRef.current);
+      }
+      if (emotionToastTimerRef.current) {
+        clearTimeout(emotionToastTimerRef.current);
       }
     },
     [],
@@ -416,24 +516,36 @@ export default function TimelineScreen() {
           ) : null}
           <View style={styles.footerHints}>
             <Text style={styles.footerHintText}>
-              아래 감정을 눌러 오늘의 기분을 남겨요
+              {isToday
+                ? '아래 감정을 눌러 오늘의 기분을 남겨요'
+                : '시간대를 선택한 뒤 감정을 눌러 그날의 기분을 남겨요'}
             </Text>
           </View>
-          <View style={[styles.quickEmotionRow, !isToday && styles.quickEmotionRowDisabled]}>
+          {emotionToastText ? (
+            <View style={styles.emotionToastBanner} accessibilityLiveRegion="polite">
+              <Text style={styles.emotionToastText}>{emotionToastText}</Text>
+            </View>
+          ) : null}
+          <View
+            style={[
+              styles.quickEmotionRow,
+              isFutureDateView && styles.quickEmotionRowDisabled,
+            ]}
+          >
             {moodOrder.map((key) => {
               const Icon = moodIcons[key];
               const m = moodPalette[key];
               return (
                 <Pressable
                   key={key}
-                  disabled={!isToday}
+                  disabled={isFutureDateView}
                   accessibilityRole="button"
                   accessibilityLabel={m.label}
                   onPress={() => onQuickEmotion(key)}
                   style={({ pressed }) => [
                     styles.quickFab,
                     { backgroundColor: m.bg, borderColor: m.border },
-                    pressed && isToday && { opacity: 0.85 },
+                    pressed && !isFutureDateView && { opacity: 0.85 },
                   ]}
                 >
                   <Icon size={22} color={m.ink} strokeWidth={2} />
@@ -447,7 +559,9 @@ export default function TimelineScreen() {
     >
       <View style={styles.timelineLayer}>
         <View style={styles.titleBlock}>
-          <Text style={styles.pageTitle}>{"⭐ 오늘의 감정 기록"}</Text>
+          <Text style={styles.pageTitle}>
+            {isToday ? '⭐ 오늘의 감정 기록' : '⭐ 감정 기록'}
+          </Text>
 
           <View style={styles.dateNav}>
             <Pressable
@@ -500,6 +614,9 @@ export default function TimelineScreen() {
                 hourYRef.current[hour] = y;
                 hourRowHeightRef.current = height;
               }}
+              slotSelected={selectedTimelineHour === hour}
+              slotSelectable={canSelectHour(hour)}
+              onPressHourSlot={onPressHourSlot}
             />
           ))}
         </ScrollView>
@@ -571,7 +688,12 @@ export default function TimelineScreen() {
         presentationStyle="fullScreen"
         onRequestClose={onDetailModalRequestClose}
       >
-        <SafeAreaView style={styles.detailModalRoot} edges={['top', 'left', 'right', 'bottom']}>
+        <View
+          style={[
+            styles.detailModalRoot,
+            { paddingTop: insets.top + 10 },
+          ]}
+        >
           <View style={styles.detailHeader}>
             <Pressable
               onPress={closeDetailModal}
@@ -621,7 +743,12 @@ export default function TimelineScreen() {
                   <Text style={styles.detailBodyMuted}>(내용 없음)</Text>
                 ) : null}
               </ScrollView>
-              <View style={styles.detailFooter}>
+              <View
+                style={[
+                  styles.detailFooter,
+                  { paddingBottom: insets.bottom + 14 },
+                ]}
+              >
                 <Pressable
                   style={({ pressed }) => [styles.detailBtnSecondary, pressed && { opacity: 0.88 }]}
                   onPress={beginDetailEdit}
@@ -689,7 +816,12 @@ export default function TimelineScreen() {
                   maxLength={500}
                 />
               </ScrollView>
-              <View style={styles.detailFooter}>
+              <View
+                style={[
+                  styles.detailFooter,
+                  { paddingBottom: insets.bottom + 14 },
+                ]}
+              >
                 <Pressable
                   style={({ pressed }) => [styles.detailBtnSecondary, pressed && { opacity: 0.88 }]}
                   onPress={cancelDetailEdit}
@@ -705,7 +837,7 @@ export default function TimelineScreen() {
               </View>
             </KeyboardAvoidingView>
           ) : null}
-        </SafeAreaView>
+        </View>
       </Modal>
     </NotebookLayout>
   );
@@ -717,6 +849,9 @@ function HourRowBlock({
   overlayOpen,
   onToggleOverlay,
   onLayoutHour,
+  slotSelected,
+  slotSelectable,
+  onPressHourSlot,
 }) {
   const n = hourEntries.length;
 
@@ -728,14 +863,30 @@ function HourRowBlock({
         onLayoutHour(y, height);
       }}
     >
-      <View style={styles.hourRow}>
+      <Pressable
+        onPress={() => onPressHourSlot(hour)}
+        disabled={!slotSelectable}
+        style={({ pressed }) => [
+          styles.hourRowPressable,
+          pressed && slotSelectable && styles.hourRowPressablePressed,
+        ]}
+        accessibilityRole={slotSelectable ? 'button' : undefined}
+        accessibilityLabel={`${String(hour).padStart(2, '0')}시 시간대 선택`}
+      >
+        <View style={styles.hourRow}>
         <View style={styles.hourLabelWrap}>
           <Text style={styles.hourLabel}>
             {String(hour).padStart(2, '0')}:00
           </Text>
         </View>
-        <View style={styles.chunkCol}>
-          <View style={styles.chunkRow} accessibilityLabel={`${String(hour).padStart(2, '0')}시 감정 바`}>
+        <View
+          style={[
+            styles.chunkColFrame,
+            slotSelected && styles.hourSlotSelectedFrame,
+          ]}
+        >
+          <View style={styles.chunkCol}>
+          <View style={styles.chunkRow} accessibilityLabel={`${String(hour).padStart(2, '0')}시 감정 줄`}>
             <EntryStrip hourEntries={hourEntries} />
           </View>
           {n > 0 ? (
@@ -750,8 +901,10 @@ function HourRowBlock({
               </Text>
             </Pressable>
           ) : null}
+          </View>
         </View>
-      </View>
+        </View>
+      </Pressable>
     </View>
   );
 }
@@ -863,6 +1016,25 @@ const styles = StyleSheet.create({
   hourBlock: {
     marginBottom: 14,
   },
+  chunkColFrame: {
+    flex: 1,
+    marginLeft: 8,
+    minWidth: 0,
+  },
+  hourSlotSelectedFrame: {
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 17,
+    borderWidth: 2,
+    borderColor: 'rgba(79, 70, 229, 0.5)',
+    backgroundColor: 'rgba(99, 102, 241, 0.06)',
+  },
+  hourRowPressable: {
+    borderRadius: 12,
+  },
+  hourRowPressablePressed: {
+    opacity: 0.9,
+  },
   hourRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -878,7 +1050,6 @@ const styles = StyleSheet.create({
   },
   chunkCol: {
     flex: 1,
-    marginLeft: 8,
     minWidth: 0,
   },
   chunkRow: {
@@ -1033,6 +1204,28 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
   },
+  emotionToastBanner: {
+    alignSelf: 'stretch',
+    marginBottom: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.08)',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  emotionToastText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: notebook.inkMuted,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
   footerWrap: {
     paddingHorizontal: 12,
     paddingTop: 10,
@@ -1082,7 +1275,10 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   detailCloseBtn: {
-    padding: 10,
+    minWidth: 40,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   detailScroll: {
     flex: 1,
@@ -1137,7 +1333,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 20,
     paddingTop: 12,
-    paddingBottom: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: notebook.gridLine,
     backgroundColor: 'rgba(255,255,255,0.6)',

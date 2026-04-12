@@ -10,6 +10,8 @@ const TIMELINE_BY_DATE_KEY = 'moodi_timeline_by_date_v1';
  * @property {MoodEmotionId|string} emotionId
  * @property {string} memo
  * @property {string} createdAt
+ * @property {string} [timelineDateKey] YYYY-MM-DD — timeline day (defaults to date of createdAt if absent)
+ * @property {number} [timelineHour] 0–23 — timeline hour slot (defaults to hour of createdAt if absent)
  */
 
 /**
@@ -143,7 +145,7 @@ export function formatDateKeyForDisplay(dateKey, locale = 'ko-KR') {
 // --- MoodEntry helpers ---
 
 /**
- * @param {{ id?: string, emotionId?: string, memo?: string, createdAt?: string }} input
+ * @param {{ id?: string, emotionId?: string, memo?: string, createdAt?: string, timelineDateKey?: string, timelineHour?: number }} input
  * @returns {MoodEntry}
  */
 export function createMoodEntry(input = {}) {
@@ -159,7 +161,51 @@ export function createMoodEntry(input = {}) {
     typeof input.id === 'string' && input.id.trim().length > 0
       ? input.id.trim()
       : `e-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-  return { id, emotionId, memo, createdAt };
+  /** @type {MoodEntry} */
+  const entry = { id, emotionId, memo, createdAt };
+  if (typeof input.timelineDateKey === 'string' && parseDateKey(input.timelineDateKey.trim())) {
+    entry.timelineDateKey = input.timelineDateKey.trim();
+  }
+  if (
+    typeof input.timelineHour === 'number' &&
+    Number.isFinite(input.timelineHour) &&
+    input.timelineHour >= 0 &&
+    input.timelineHour <= 23
+  ) {
+    entry.timelineHour = Math.floor(input.timelineHour);
+  }
+  return entry;
+}
+
+/**
+ * Timeline day for grouping (legacy entries infer from createdAt).
+ * @param {MoodEntry} e
+ * @returns {string}
+ */
+export function getEntryTimelineDateKey(e) {
+  if (e?.timelineDateKey && parseDateKey(String(e.timelineDateKey))) {
+    return String(e.timelineDateKey).trim();
+  }
+  if (!e?.createdAt) return '';
+  return toDateKey(new Date(e.createdAt));
+}
+
+/**
+ * Timeline hour slot 0–23 (legacy entries infer from createdAt).
+ * @param {MoodEntry} e
+ * @returns {number}
+ */
+export function getEntryTimelineHour(e) {
+  if (
+    typeof e?.timelineHour === 'number' &&
+    Number.isFinite(e.timelineHour) &&
+    e.timelineHour >= 0 &&
+    e.timelineHour <= 23
+  ) {
+    return e.timelineHour;
+  }
+  if (!e?.createdAt) return 0;
+  return new Date(e.createdAt).getHours();
 }
 
 /**
@@ -181,7 +227,20 @@ export function normalizeMoodEntries(raw) {
       ? String(row.emotionId)
       : 'happy';
     const memo = typeof row.memo === 'string' ? row.memo.trim() : '';
-    out.push({ id, emotionId, memo, createdAt });
+    /** @type {MoodEntry} */
+    const normalized = { id, emotionId, memo, createdAt };
+    if (typeof row.timelineDateKey === 'string' && parseDateKey(row.timelineDateKey.trim())) {
+      normalized.timelineDateKey = row.timelineDateKey.trim();
+    }
+    if (
+      typeof row.timelineHour === 'number' &&
+      Number.isFinite(row.timelineHour) &&
+      row.timelineHour >= 0 &&
+      row.timelineHour <= 23
+    ) {
+      normalized.timelineHour = Math.floor(row.timelineHour);
+    }
+    out.push(normalized);
   }
   return out.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 }
@@ -195,7 +254,8 @@ export function groupEntriesByDate(entries) {
   if (!Array.isArray(entries)) return map;
   for (const e of entries) {
     if (!e?.createdAt) continue;
-    const dk = toDateKey(new Date(e.createdAt));
+    const dk = getEntryTimelineDateKey(e);
+    if (!dk) continue;
     if (!map[dk]) map[dk] = [];
     map[dk].push(e);
   }
@@ -215,7 +275,7 @@ export function getEntriesForDate(entries, dateKey) {
   return entries
     .filter((e) => {
       if (!e?.createdAt) return false;
-      return toDateKey(new Date(e.createdAt)) === dateKey;
+      return getEntryTimelineDateKey(e) === dateKey;
     })
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 }
@@ -227,10 +287,7 @@ export function getEntriesForDate(entries, dateKey) {
  * @returns {MoodEntry[]}
  */
 export function getEntriesForDateHour(entries, dateKey, hour) {
-  return getEntriesForDate(entries, dateKey).filter((e) => {
-    const h = new Date(e.createdAt).getHours();
-    return h === hour;
-  });
+  return getEntriesForDate(entries, dateKey).filter((e) => getEntryTimelineHour(e) === hour);
 }
 
 /**
@@ -274,7 +331,7 @@ export function buildTimelineHourMapFromEntries(entries, dateKey) {
   for (let h = 0; h < 24; h += 1) map[h] = [];
   const day = getEntriesForDate(entries, dateKey);
   for (const e of day) {
-    const h = new Date(e.createdAt).getHours();
+    const h = getEntryTimelineHour(e);
     map[h].push(e);
   }
   for (let h = 0; h < 24; h += 1) {
@@ -308,7 +365,7 @@ function buildLegacyHourMapFromDayEntries(dayEntries) {
   let hourMap = createEmptyHourMap();
   for (const e of sorted) {
     const d = new Date(e.createdAt);
-    const h = d.getHours();
+    const h = getEntryTimelineHour(e);
     const chunk = Math.min(5, Math.floor(d.getMinutes() / 10));
     const row = [...(hourMap[h] ?? createEmptyChunks())];
     const prev = row[chunk];

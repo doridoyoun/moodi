@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -7,7 +7,13 @@ import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import NotebookLayout from '../components/NotebookLayout';
 import { useMood } from '../src/context/MoodContext';
 import { moodOrder, moodPalette, notebook } from '../constants/theme';
-import { computeTopTwoEmotionIdsFromEntries } from '../storage/timelineStateStorage';
+import {
+  computeTopTwoEmotionIdsFromEntries,
+  parseDateKey,
+  toDateKey,
+} from '../storage/timelineStateStorage';
+import { CALENDAR_INSIGHT_PLACEHOLDER, getCalendarInsight } from '../utils/calendarInsight';
+import { emotionBgSequenceForDay } from '../utils/monthlyFlowHelpers';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -34,10 +40,25 @@ function dateKeyForDay(year, monthIndex, day) {
   return `${year}-${m}-${dd}`;
 }
 
+function formatShortMd(dateKey) {
+  const p = parseDateKey(dateKey);
+  if (!p) return '';
+  return `${p.monthIndex + 1}/${String(p.day).padStart(2, '0')}`;
+}
+
 export default function CalendarScreen() {
   const navigation = useNavigation();
-  const { entries, setSelectedDate } = useMood();
+  const { entries, selectedDate, setSelectedDate } = useMood();
   const [cursor, setCursor] = useState(() => new Date());
+
+  useEffect(() => {
+    const p = parseDateKey(selectedDate);
+    if (!p) return;
+    setCursor((c) => {
+      if (c.getFullYear() === p.year && c.getMonth() === p.monthIndex) return c;
+      return new Date(p.year, p.monthIndex, 1);
+    });
+  }, [selectedDate]);
 
   const year = cursor.getFullYear();
   const monthIndex = cursor.getMonth();
@@ -56,6 +77,13 @@ export default function CalendarScreen() {
     [year, monthIndex],
   );
 
+  const selectedDayPreviewColors = useMemo(
+    () => emotionBgSequenceForDay(entries, selectedDate, 6),
+    [entries, selectedDate],
+  );
+
+  const patternInsightLine = useMemo(() => getCalendarInsight(entries), [entries]);
+
   const shiftMonth = (delta) => {
     setCursor((d) => new Date(d.getFullYear(), d.getMonth() + delta, 1));
   };
@@ -63,10 +91,14 @@ export default function CalendarScreen() {
   const goToTimeline = (day) => {
     const key = dateKeyForDay(year, monthIndex, day);
     setSelectedDate(key);
-    navigation.navigate({
-      name: 'Timeline',
-      merge: true,
-    });
+    const tabNav = navigation.getParent();
+    if (tabNav) {
+      tabNav.navigate('Timeline');
+    }
+  };
+
+  const openMonthlyFlow = () => {
+    navigation.navigate('MonthlyFlow', { year, monthIndex });
   };
 
   return (
@@ -116,6 +148,9 @@ export default function CalendarScreen() {
                 return <View key={`e-${idx}`} style={styles.cell} />;
               }
               const key = dateKeyForDay(year, monthIndex, day);
+              const todayKey = toDateKey(new Date());
+              const isTodayCell = key === todayKey;
+              const isSelectedCell = key === selectedDate;
               const topTwo = computeTopTwoEmotionIdsFromEntries(entries, key);
               const fallbackA = 'rgba(255,255,255,0.55)';
               const fallbackB = 'rgba(247,250,252,0.95)';
@@ -135,7 +170,12 @@ export default function CalendarScreen() {
                 <View key={`d-${day}`} style={styles.cell}>
                   <Pressable
                     onPress={() => goToTimeline(day)}
-                    style={({ pressed }) => [styles.dayCell, pressed && styles.dayPressActive]}
+                    style={({ pressed }) => [
+                      styles.dayCell,
+                      isTodayCell && !isSelectedCell && styles.dayCellToday,
+                      isSelectedCell && styles.dayCellSelected,
+                      pressed && styles.dayPressActive,
+                    ]}
                     accessibilityRole="button"
                     accessibilityLabel={`${day}일, 타임라인으로 이동`}
                   >
@@ -149,6 +189,7 @@ export default function CalendarScreen() {
                       style={[
                         styles.dayText,
                         { color: topTwo.length ? notebook.ink : notebook.inkMuted },
+                        isSelectedCell && styles.dayTextSelected,
                       ]}
                     >
                       {day}
@@ -158,6 +199,42 @@ export default function CalendarScreen() {
               );
             })}
           </View>
+
+          <View style={styles.selectedDetail}>
+            <Text style={styles.selectedDetailTitle}>선택한 날</Text>
+            <View style={styles.selectedPreviewRow}>
+              <Text style={styles.selectedPreviewDate}>{formatShortMd(selectedDate)}</Text>
+              <View style={styles.previewBarWrap}>
+                {selectedDayPreviewColors.length === 0 ? (
+                  <View style={styles.previewBarEmpty} />
+                ) : (
+                  <View style={styles.previewBarRow}>
+                    {selectedDayPreviewColors.map((bg, i) => (
+                      <View
+                        key={`pv-${selectedDate}-${i}`}
+                        style={[styles.previewSegment, { backgroundColor: bg }]}
+                      />
+                    ))}
+                  </View>
+                )}
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.patternInsightBlock}>
+            <Text style={styles.patternInsightText} numberOfLines={1}>
+              {patternInsightLine ?? CALENDAR_INSIGHT_PLACEHOLDER}
+            </Text>
+          </View>
+
+          <Pressable
+            onPress={openMonthlyFlow}
+            style={({ pressed }) => [styles.flowEntry, pressed && styles.flowEntryPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="이번 달 전체 감정 흐름 보기"
+          >
+            <Text style={styles.flowEntryText}>이번 달 전체 흐름 보기 →</Text>
+          </Pressable>
 
           <View style={styles.legend}>
             {moodOrder.map((k) => {
@@ -249,15 +326,101 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.06)',
   },
+  dayCellToday: {
+    borderWidth: 1.5,
+    borderColor: 'rgba(79, 70, 229, 0.35)',
+  },
+  dayCellSelected: {
+    borderWidth: 2,
+    borderColor: 'rgba(79, 70, 229, 0.52)',
+  },
   dayPressActive: {
     opacity: 0.82,
   },
   dayText: {
     position: 'relative',
-    zIndex: 1,
+    zIndex: 2,
     textAlign: 'center',
     fontSize: 13,
     fontWeight: '700',
+  },
+  dayTextSelected: {
+    fontWeight: '800',
+    color: '#2d3748',
+  },
+  selectedDetail: {
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: notebook.gridLine,
+  },
+  selectedDetailTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: notebook.inkLight,
+    marginBottom: 8,
+  },
+  selectedPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  selectedPreviewDate: {
+    width: 44,
+    fontSize: 15,
+    fontWeight: '800',
+    color: notebook.ink,
+    fontVariant: ['tabular-nums'],
+  },
+  previewBarWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  previewBarRow: {
+    flexDirection: 'row',
+    height: 20,
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.08)',
+  },
+  previewSegment: {
+    flex: 1,
+    minWidth: 6,
+  },
+  previewBarEmpty: {
+    height: 20,
+    borderRadius: 8,
+    backgroundColor: 'rgba(15, 23, 42, 0.06)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.08)',
+  },
+  patternInsightBlock: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: notebook.gridLine,
+  },
+  patternInsightText: {
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '500',
+    color: notebook.inkMuted,
+    textAlign: 'center',
+  },
+  flowEntry: {
+    marginTop: 12,
+    alignSelf: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  flowEntryPressed: {
+    opacity: 0.75,
+  },
+  flowEntryText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#4f46e5',
   },
   legend: {
     flexDirection: 'row',

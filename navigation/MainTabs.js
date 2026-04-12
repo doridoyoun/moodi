@@ -2,7 +2,7 @@ import { StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar, Clock, Image as ImageIcon } from 'lucide-react-native';
-import CalendarScreen from '../screens/CalendarScreen';
+import CalendarStack from './CalendarStack';
 import GalleryScreen from '../screens/GalleryScreen';
 import TimelineScreen from '../screens/TimelineScreen';
 import { notebook } from '../constants/theme';
@@ -73,7 +73,7 @@ export default function MainTabs() {
       />
       <Tab.Screen
         name="Calendar"
-        component={CalendarScreen}
+        component={CalendarStack}
         options={{
           tabBarIcon: ({ color }) => (
             <Calendar color={color} size={TAB_ICON_SIZE} strokeWidth={2} />

@@ -13,7 +13,6 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,6 +29,7 @@ import NotebookLayout from '../components/NotebookLayout';
 import { useMemoFont } from '../src/context/MemoFontContext';
 import { useMood } from '../src/context/MoodContext';
 import { moodOrder, moodPalette, notebook } from '../constants/theme';
+import { formatDateKeyForDisplay, parseDateKey, toDateKey } from '../storage/timelineStateStorage';
 
 const modalEmotionIcons = {
   happy: Smile,
@@ -41,6 +41,16 @@ const modalEmotionIcons = {
 
 function formatMoodiCanvasDate() {
   return new Date().toLocaleDateString('ko-KR', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  });
+}
+
+function canvasDateLabelForDateKey(dateKey) {
+  const p = parseDateKey(dateKey);
+  if (!p) return formatMoodiCanvasDate();
+  return new Date(p.year, p.monthIndex, p.day).toLocaleDateString('ko-KR', {
     year: 'numeric',
     month: 'numeric',
     day: 'numeric',
@@ -82,8 +92,6 @@ const OUTER_CARD_BACKGROUND = '#E5E5E5';
 const MOODI_SLOT_ASPECT = 3 / 4;
 
 const INNER_FRAME_COLOR_KEYS = ['white', 'black', 'happy', 'flutter', 'calm', 'gloom', 'annoyed'];
-
-const INNER_FRAME_STORAGE_KEY = 'moodiGalleryInnerFrameColor';
 
 function parseHexRgb(hex) {
   const h = (hex || '').replace('#', '').trim();
@@ -428,6 +436,8 @@ function TodaysMoodiCanvas({
   gridGap = MOBILE_GRID_GAP,
   /** Per-screen metrics from Gallery (spacing + unified slot dimensions) */
   layoutMetrics,
+  /** Footer date line (defaults to “today” if omitted) */
+  canvasDateText,
 }) {
   const { memoFontFamily } = useMemoFont();
   const fv = frameVisuals ?? getFrameVisuals('white');
@@ -569,7 +579,9 @@ function TodaysMoodiCanvas({
           layoutMetrics != null && { marginTop: layoutMetrics.footerMt },
         ]}
       >
-        <Text style={[moodiCanvasStyles.canvasDate, { color: fv.dateColor }]}>{formatMoodiCanvasDate()}</Text>
+        <Text style={[moodiCanvasStyles.canvasDate, { color: fv.dateColor }]}>
+          {canvasDateText ?? formatMoodiCanvasDate()}
+        </Text>
         <Text style={[moodiCanvasStyles.canvasBrand, { color: fv.brandColor, opacity: fv.brandOpacity }]}>
           Moodi
         </Text>
@@ -698,7 +710,18 @@ export default function GalleryScreen() {
     moodiDaySummary,
     setMoodiDaySummary,
     addAlbumItem,
+    selectedDate,
+    innerFrameColorKey,
+    setInnerFrameColorKey,
   } = useMood();
+
+  const todayKey = toDateKey(new Date());
+  const isGalleryDateToday = selectedDate === todayKey;
+  const galleryDateLine = useMemo(
+    () => formatDateKeyForDisplay(selectedDate, 'ko-KR'),
+    [selectedDate],
+  );
+  const canvasFooterDate = useMemo(() => canvasDateLabelForDateKey(selectedDate), [selectedDate]);
 
   const [emotionModalVisible, setEmotionModalVisible] = useState(false);
   const [pendingImageUri, setPendingImageUri] = useState(null);
@@ -707,33 +730,7 @@ export default function GalleryScreen() {
   const [slotPickerVisible, setSlotPickerVisible] = useState(false);
   const [activeSlotIndex, setActiveSlotIndex] = useState(0);
 
-  const [innerFrameColorKey, setInnerFrameColorKeyState] = useState('white');
-
   const frameVisuals = useMemo(() => getFrameVisuals(innerFrameColorKey), [innerFrameColorKey]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(INNER_FRAME_STORAGE_KEY);
-        if (cancelled || !raw) return;
-        if (INNER_FRAME_COLOR_KEYS.includes(raw)) {
-          setInnerFrameColorKeyState(raw);
-        }
-      } catch {
-        /* ignore */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const setInnerFrameColorKey = useCallback((key) => {
-    if (!INNER_FRAME_COLOR_KEYS.includes(key)) return;
-    setInnerFrameColorKeyState(key);
-    AsyncStorage.setItem(INNER_FRAME_STORAGE_KEY, key).catch(() => {});
-  }, []);
 
   const moodiCaptureRef = useRef(null);
   const memoModalInputRef = useRef(null);
@@ -911,11 +908,14 @@ export default function GalleryScreen() {
   const confirmClearAllFourSlots = useCallback(() => {
     const hasAny = fourSlotIds.some(Boolean);
     if (!hasAny) return;
-    Alert.alert('네컷 비우기', '오늘의 Moodi 슬롯을 모두 비울까요?', [
+    const msg = isGalleryDateToday
+      ? '오늘의 Moodi 슬롯을 모두 비울까요?'
+      : '이 날짜의 Moodi 슬롯을 모두 비울까요?';
+    Alert.alert('네컷 비우기', msg, [
       { text: '취소', style: 'cancel' },
       { text: '비우기', style: 'destructive', onPress: clearAllFourSlots },
     ]);
-  }, [clearAllFourSlots, fourSlotIds]);
+  }, [clearAllFourSlots, fourSlotIds, isGalleryDateToday]);
 
   return (
     <NotebookLayout>
@@ -928,7 +928,10 @@ export default function GalleryScreen() {
         >
           <View style={[styles.titleRow, { marginBottom: galleryFitMetrics.titleRowMb }]}>
             <Text style={styles.emoji}>📷</Text>
-            <Text style={styles.pageTitle}>Mood Gallery</Text>
+            <View style={styles.titleTextCol}>
+              <Text style={styles.pageTitle}>Mood Gallery</Text>
+              <Text style={styles.pageDateHint}>{galleryDateLine}</Text>
+            </View>
           </View>
 
           <View style={styles.galleryMiddle} onLayout={onGalleryMiddleLayout}>
@@ -953,6 +956,7 @@ export default function GalleryScreen() {
                   onSummaryPress={openMemoModal}
                   frameVisuals={frameVisuals}
                   layoutMetrics={galleryFitLayoutMetrics}
+                  canvasDateText={canvasFooterDate}
                 />
               </View>
               <View style={[styles.fourCutTitleRow, { marginTop: galleryFitMetrics.fourCutTitleRowMt }]}>
@@ -1033,6 +1037,7 @@ export default function GalleryScreen() {
             isExport
             frameVisuals={frameVisuals}
             layoutMetrics={exportLayoutMetrics}
+            canvasDateText={canvasFooterDate}
           />
         </View>
       </View>
@@ -1112,13 +1117,14 @@ export default function GalleryScreen() {
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
                 bounces={false}
-                contentContainerStyle={styles.emotionModalScrollContent}
+                contentContainerStyle={{ paddingBottom: 12 }}
               >
                 <EmotionModalBody
                   pickedEmotion={pickedEmotion}
                   setPickedEmotion={setPickedEmotion}
                   submitAlbumEntry={submitAlbumEntry}
                   resetEmotionModal={resetEmotionModal}
+                  bottomInset={insets.bottom}
                 />
               </ScrollView>
             </Pressable>
@@ -1190,9 +1196,15 @@ export default function GalleryScreen() {
   );
 }
 
-function EmotionModalBody({ pickedEmotion, setPickedEmotion, submitAlbumEntry, resetEmotionModal }) {
+function EmotionModalBody({
+  pickedEmotion,
+  setPickedEmotion,
+  submitAlbumEntry,
+  resetEmotionModal,
+  bottomInset,
+}) {
   return (
-    <View style={styles.emotionSheet}>
+    <View style={[styles.emotionSheet, { paddingBottom: bottomInset + 20 }]}>
       <Text style={styles.emotionPickerTitle}>감정 선택</Text>
       <View style={styles.emotionPickerRowWrap}>
         <View style={styles.emotionRowModal}>
@@ -1268,7 +1280,7 @@ const styles = StyleSheet.create({
   },
   titleRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 8,
     flexShrink: 0,
   },
@@ -1279,6 +1291,16 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: notebook.ink,
+  },
+  titleTextCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  pageDateHint: {
+    marginTop: 2,
+    fontSize: 13,
+    fontWeight: '600',
+    color: notebook.inkMuted,
   },
   fourCutTitleRow: {
     flexDirection: 'row',
@@ -1405,13 +1427,10 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: '100%',
   },
-  emotionModalScrollContent: {
-    paddingBottom: 12,
-  },
   emotionSheet: {
     backgroundColor: '#fff',
     borderRadius: 18,
-    paddingVertical: 18,
+    paddingTop: 18,
     paddingHorizontal: 20,
     maxHeight: '90%',
   },
@@ -1420,7 +1439,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: notebook.ink,
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   modalTitle: {
     fontSize: 17,
@@ -1430,7 +1449,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   emotionPickerRowWrap: {
-    marginTop: 8,
+    marginTop: 6,
   },
   emotionRowModal: {
     flexDirection: 'row',
@@ -1463,7 +1482,8 @@ const styles = StyleSheet.create({
     }),
   },
   emotionSubmitBtn: {
-    marginTop: 24,
+    marginTop: 20,
+    marginBottom: 16,
     backgroundColor: notebook.ink,
     borderRadius: 14,
     paddingVertical: 14,
@@ -1478,10 +1498,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   modalCancel: {
-    marginTop: 12,
+    alignSelf: 'center',
     alignItems: 'center',
-    paddingVertical: 10,
-    paddingBottom: 2,
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
   },
   modalCancelText: {
     fontSize: 15,
