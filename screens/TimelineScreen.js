@@ -415,7 +415,6 @@ export default function TimelineScreen() {
             </View>
           ) : null}
           <View style={styles.footerHints}>
-            <Text style={styles.footerQuickHint}>빠르게 지금 감정 기록</Text>
             <Text style={styles.footerHintText}>
               아래 감정을 눌러 오늘의 기분을 남겨요
             </Text>
@@ -1042,13 +1041,6 @@ const styles = StyleSheet.create({
   footerHints: {
     marginBottom: 10,
     gap: 4,
-  },
-  footerQuickHint: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: notebook.inkMuted,
-    textAlign: 'center',
-    lineHeight: 18,
   },
   footerHintText: {
     fontSize: 12,
