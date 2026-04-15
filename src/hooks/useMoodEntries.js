@@ -4,7 +4,9 @@ import {
   createMoodEntry,
   getEntriesForDate,
   getEntriesForDateHour,
+  getEntryTimelineDateKey,
   parseDateKey,
+  rebuildMoodEntry,
   toDateKey,
 } from '../../storage/timelineStateStorage';
 
@@ -40,26 +42,41 @@ export function useMoodEntries({ entries, setEntries, selectedDate, setSelectedD
     return entry;
   }, [setEntries]);
 
-  const updateEntry = useCallback(
-    (id, updates) => {
-      setEntries((prev) =>
-        prev.map((e) => {
+  const updateEntry = useCallback((id, updates) => {
+    setEntries((prev) =>
+      prev
+        .map((e) => {
           if (e.id !== id) return e;
-          const emotionId = updates.emotionId !== undefined ? updates.emotionId : e.emotionId;
-          const memo = updates.memo !== undefined ? String(updates.memo).trim() : e.memo;
-          return createMoodEntry({
-            id: e.id,
-            emotionId,
-            memo,
-            createdAt: e.createdAt,
-            timelineDateKey: e.timelineDateKey,
-            timelineHour: e.timelineHour,
-          });
-        }),
-      );
-    },
-    [setEntries],
-  );
+          return rebuildMoodEntry(e, updates);
+        })
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)),
+    );
+  }, [setEntries]);
+
+  const setRepresentativeOverrideForDate = useCallback((entryId, dateKey, enabled) => {
+    setEntries((prev) => {
+      const next = prev.map((e) => {
+        if (getEntryTimelineDateKey(e) !== dateKey) return e;
+        if (enabled) {
+          if (e.id === entryId) {
+            return rebuildMoodEntry(e, {
+              isRepresentativeOverride: true,
+              representativeOverrideAt: new Date().toISOString(),
+            });
+          }
+          if (e.isRepresentativeOverride) {
+            return rebuildMoodEntry(e, { isRepresentativeOverride: false });
+          }
+          return e;
+        }
+        if (e.id === entryId && e.isRepresentativeOverride) {
+          return rebuildMoodEntry(e, { isRepresentativeOverride: false });
+        }
+        return e;
+      });
+      return next.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    });
+  }, [setEntries]);
 
   const deleteEntry = useCallback(
     (id) => {
@@ -85,5 +102,6 @@ export function useMoodEntries({ entries, setEntries, selectedDate, setSelectedD
     updateEntry,
     deleteEntry,
     applyEmotionForCurrentHour,
+    setRepresentativeOverrideForDate,
   };
 }

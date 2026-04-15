@@ -1,0 +1,505 @@
+import { useCallback } from 'react';
+import { Image, Keyboard, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { CloudRain, Flame, Heart, Leaf, Smile, X } from 'lucide-react-native';
+import CenteredKeyboardFormModal from '../CenteredKeyboardFormModal';
+import { moodOrder, moodPalette, notebook } from '../../constants/theme';
+import { formatEntryTime, splitMemo } from '../../utils/timelineEntryFormat';
+import EmotionDisplayToken from './EmotionDisplayToken';
+
+const moodIcons = {
+  happy: Smile,
+  flutter: Heart,
+  calm: Leaf,
+  gloom: CloudRain,
+  annoyed: Flame,
+};
+
+export default function EntryDetailModalCard({
+  visible,
+  entry,
+  isDetailEditing,
+  detailEditEmotion,
+  setDetailEditEmotion,
+  detailEditTitle,
+  setDetailEditTitle,
+  detailEditContent,
+  setDetailEditContent,
+  bottomInset,
+  onClose,
+  onRequestClose,
+  onBeginEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onConfirmDelete,
+  isRepresentativeOverride = false,
+  onToggleRepresentativeOverride,
+  detailEditImageUri,
+  setDetailEditImageUri,
+}) {
+  const split = entry ? splitMemo(entry.memo) : { title: '', content: '' };
+  const pal = entry ? moodPalette[entry.emotionId] ?? moodPalette.happy : moodPalette.happy;
+  const emotionLabel = entry ? pal.label : '';
+
+  const pickPhoto = useCallback(async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [3, 4],
+      quality: 0.85,
+    });
+    if (!result.canceled && result.assets?.[0]?.uri && setDetailEditImageUri) {
+      setDetailEditImageUri(result.assets[0].uri);
+    }
+  }, [setDetailEditImageUri]);
+
+  const clearPhoto = useCallback(() => {
+    setDetailEditImageUri?.(null);
+  }, [setDetailEditImageUri]);
+
+  const viewPhotoUri =
+    entry?.imageUri && String(entry.imageUri).trim().length > 0 ? entry.imageUri.trim() : null;
+  const editPhotoUri =
+    typeof detailEditImageUri === 'string' && detailEditImageUri.trim().length > 0
+      ? detailEditImageUri.trim()
+      : null;
+
+  return (
+    <CenteredKeyboardFormModal
+      visible={visible}
+      onRequestClose={onRequestClose}
+      onBackdropPress={isDetailEditing ? onCancelEdit : onClose}
+      bottomInset={bottomInset}
+      backdropColor="rgba(15, 23, 42, 0.35)"
+      maxHeightRatio={0.92}
+    >
+      <View style={styles.card} pointerEvents="auto">
+        <Pressable
+          onPress={onClose}
+          style={({ pressed }) => [styles.closeBtn, pressed && { opacity: 0.75 }]}
+          accessibilityRole="button"
+          accessibilityLabel="닫기"
+          hitSlop={12}
+        >
+          <X size={22} color={notebook.inkMuted} strokeWidth={2} />
+        </Pressable>
+
+        {entry && !isDetailEditing ? (
+          <>
+            <View style={styles.bodyBlock}>
+              <View style={styles.viewMeta}>
+                <EmotionDisplayToken
+                  emotionId={entry.emotionId}
+                  size="detail"
+                  showTime={false}
+                  compact
+                />
+                <View style={styles.viewMetaText}>
+                  <Text style={[styles.emotionLabel, { color: pal.ink }]}>{emotionLabel}</Text>
+                  <Text style={styles.timeText}>{formatEntryTime(entry.createdAt)}</Text>
+                </View>
+              </View>
+              {split.title ? <Text style={styles.title}>{split.title}</Text> : null}
+              {split.content ? (
+                <Text style={styles.bodyText}>{split.content}</Text>
+              ) : !split.title ? (
+                <Text style={styles.bodyMuted}>(내용 없음)</Text>
+              ) : null}
+              {viewPhotoUri ? (
+                <Image source={{ uri: viewPhotoUri }} style={styles.viewPhoto} resizeMode="cover" />
+              ) : null}
+            </View>
+            {typeof onToggleRepresentativeOverride === 'function' ? (
+              <View style={styles.overrideRow}>
+                <View style={styles.overrideTextCol}>
+                  <Text style={styles.overrideTitle}>오늘의 대표 메모</Text>
+                  <Text style={styles.overrideSub}>하루 분석에 이 기록을 씁니다</Text>
+                </View>
+                <Switch
+                  accessibilityLabel="오늘의 대표 메모로 설정"
+                  value={isRepresentativeOverride}
+                  onValueChange={onToggleRepresentativeOverride}
+                  trackColor={{ false: notebook.gridLine, true: 'rgba(22, 163, 74, 0.35)' }}
+                  thumbColor={isRepresentativeOverride ? '#16a34a' : '#f4f4f5'}
+                />
+              </View>
+            ) : null}
+            <View style={styles.footer}>
+              <Pressable
+                style={({ pressed }) => [styles.btnSecondary, pressed && { opacity: 0.88 }]}
+                onPress={onBeginEdit}
+              >
+                <Text style={styles.btnSecondaryText}>수정</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.btnDanger, pressed && { opacity: 0.88 }]}
+                onPress={() => onConfirmDelete(entry.id)}
+              >
+                <Text style={styles.btnDangerText}>삭제</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : null}
+
+        {entry && isDetailEditing ? (
+          <>
+            <View style={styles.bodyEdit}>
+              <View style={styles.editEmotionRow}>
+                {moodOrder.map((key) => {
+                  const Icon = moodIcons[key];
+                  const m = moodPalette[key];
+                  const selected = detailEditEmotion === key;
+                  return (
+                    <Pressable
+                      key={key}
+                      accessibilityRole="button"
+                      accessibilityLabel={m.label}
+                      onPress={() => setDetailEditEmotion(key)}
+                      style={({ pressed }) => [
+                        styles.editFab,
+                        { backgroundColor: m.bg, borderColor: m.border },
+                        selected && styles.editFabSelected,
+                        pressed && { opacity: 0.88 },
+                      ]}
+                    >
+                      <Icon size={17} color={m.ink} strokeWidth={2} />
+                      <Text style={[styles.editFabLabel, { color: m.ink }]}>{m.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <TextInput
+                style={styles.titleInput}
+                placeholder="제목 (선택)"
+                placeholderTextColor={notebook.inkLight}
+                value={detailEditTitle}
+                onChangeText={setDetailEditTitle}
+                maxLength={200}
+              />
+              <TextInput
+                style={styles.memoInput}
+                placeholder="내용 (선택)"
+                placeholderTextColor={notebook.inkLight}
+                value={detailEditContent}
+                onChangeText={setDetailEditContent}
+                multiline
+                maxLength={500}
+              />
+              <Text style={styles.photoHint}>사진은 메모에 최대 1장 붙일 수 있어요</Text>
+              {editPhotoUri ? (
+                <Image source={{ uri: editPhotoUri }} style={styles.editPhoto} resizeMode="cover" />
+              ) : null}
+              <View style={styles.photoActions}>
+                <Pressable
+                  style={({ pressed }) => [styles.photoBtn, pressed && { opacity: 0.85 }]}
+                  onPress={pickPhoto}
+                  accessibilityRole="button"
+                  accessibilityLabel="사진 선택"
+                >
+                  <Text style={styles.photoBtnText}>{editPhotoUri ? '사진 바꾸기' : '사진 추가'}</Text>
+                </Pressable>
+                {editPhotoUri ? (
+                  <Pressable
+                    style={({ pressed }) => [styles.photoBtnSecondary, pressed && { opacity: 0.85 }]}
+                    onPress={clearPhoto}
+                    accessibilityRole="button"
+                    accessibilityLabel="사진 삭제"
+                  >
+                    <Text style={styles.photoBtnSecondaryText}>사진 삭제</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
+            <View style={styles.footer}>
+              <Pressable
+                style={({ pressed }) => [styles.btnSecondary, pressed && { opacity: 0.88 }]}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  onCancelEdit();
+                }}
+              >
+                <Text style={styles.btnSecondaryText}>취소</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.btnPrimary, pressed && { opacity: 0.9 }]}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  onSaveEdit();
+                }}
+              >
+                <Text style={styles.btnPrimaryText}>저장</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : null}
+      </View>
+    </CenteredKeyboardFormModal>
+  );
+}
+
+const styles = StyleSheet.create({
+  card: {
+    width: '100%',
+    maxWidth: 400,
+    maxHeight: '88%',
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  closeBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    zIndex: 2,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bodyBlock: {
+    maxHeight: 420,
+    paddingTop: 44,
+    paddingHorizontal: 18,
+    paddingBottom: 12,
+  },
+  bodyEdit: {
+    maxHeight: 420,
+    paddingTop: 44,
+    paddingHorizontal: 18,
+    paddingBottom: 12,
+  },
+  viewMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 14,
+  },
+  viewMetaText: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+  },
+  emotionLabel: {
+    fontSize: 17,
+    fontWeight: '600',
+    letterSpacing: -0.15,
+  },
+  timeText: {
+    marginTop: 3,
+    fontSize: 12,
+    fontWeight: '500',
+    color: notebook.inkLight,
+    fontVariant: ['tabular-nums'],
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: notebook.ink,
+    lineHeight: 28,
+    marginBottom: 12,
+  },
+  bodyText: {
+    fontSize: 15,
+    lineHeight: 24,
+    color: notebook.ink,
+  },
+  bodyMuted: {
+    fontSize: 14,
+    color: notebook.inkLight,
+    fontStyle: 'italic',
+  },
+  overrideRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    marginHorizontal: 0,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: notebook.gridLine,
+    backgroundColor: 'rgba(247,250,252,0.9)',
+  },
+  overrideTextCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  overrideTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: notebook.ink,
+  },
+  overrideSub: {
+    marginTop: 3,
+    fontSize: 12,
+    fontWeight: '500',
+    color: notebook.inkLight,
+    lineHeight: 17,
+  },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: notebook.gridLine,
+    backgroundColor: 'rgba(255,255,255,0.98)',
+  },
+  btnSecondary: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 13,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: notebook.gridLine,
+    backgroundColor: '#fff',
+  },
+  btnSecondaryText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: notebook.ink,
+  },
+  btnDanger: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 13,
+    borderRadius: 12,
+    backgroundColor: 'rgba(180, 40, 40, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(180, 40, 40, 0.35)',
+  },
+  btnDangerText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#b91c1c',
+  },
+  btnPrimary: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 13,
+    borderRadius: 12,
+    backgroundColor: notebook.ink,
+  },
+  btnPrimaryText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  editEmotionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'stretch',
+    marginBottom: 14,
+  },
+  editFab: {
+    flex: 1,
+    minWidth: 0,
+    marginHorizontal: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 7,
+    paddingHorizontal: 1,
+    borderRadius: 999,
+    borderWidth: 1.5,
+  },
+  editFabSelected: {
+    borderWidth: 2.5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 3,
+  },
+  editFabLabel: {
+    marginTop: 3,
+    fontSize: 8,
+    fontWeight: '600',
+  },
+  titleInput: {
+    borderWidth: 1,
+    borderColor: notebook.gridLine,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    fontWeight: '600',
+    color: notebook.ink,
+    backgroundColor: notebook.bg,
+    marginBottom: 10,
+  },
+  memoInput: {
+    minHeight: 110,
+    maxHeight: 200,
+    borderWidth: 1,
+    borderColor: notebook.gridLine,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: notebook.ink,
+    backgroundColor: notebook.bg,
+    textAlignVertical: 'top',
+  },
+  viewPhoto: {
+    width: '100%',
+    aspectRatio: 3 / 4,
+    borderRadius: 12,
+    marginTop: 14,
+    backgroundColor: notebook.bg,
+  },
+  photoHint: {
+    marginTop: 10,
+    marginBottom: 8,
+    fontSize: 12,
+    fontWeight: '500',
+    color: notebook.inkLight,
+  },
+  editPhoto: {
+    width: '100%',
+    aspectRatio: 3 / 4,
+    borderRadius: 12,
+    marginBottom: 10,
+    backgroundColor: notebook.bg,
+  },
+  photoActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 4,
+  },
+  photoBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: notebook.ink,
+  },
+  photoBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  photoBtnSecondary: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: notebook.gridLine,
+    backgroundColor: '#fff',
+  },
+  photoBtnSecondaryText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: notebook.inkMuted,
+  },
+});

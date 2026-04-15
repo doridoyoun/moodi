@@ -40,6 +40,7 @@ export function MoodProvider({ children }) {
     updateEntry,
     deleteEntry,
     applyEmotionForCurrentHour,
+    setRepresentativeOverrideForDate,
   } = useMoodEntries({ entries, setEntries, selectedDate, setSelectedDate });
 
   const {
@@ -78,6 +79,7 @@ export function MoodProvider({ children }) {
       updateEntry,
       deleteEntry,
       applyEmotionForCurrentHour,
+      setRepresentativeOverrideForDate,
       albumItems,
       galleryByDate,
       addAlbumItem,
@@ -103,6 +105,7 @@ export function MoodProvider({ children }) {
       updateEntry,
       deleteEntry,
       applyEmotionForCurrentHour,
+      setRepresentativeOverrideForDate,
       albumItems,
       galleryByDate,
       addAlbumItem,

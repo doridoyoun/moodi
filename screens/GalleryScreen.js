@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Image,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -26,6 +25,7 @@ import {
   Smile,
 } from 'lucide-react-native';
 import { captureRef } from 'react-native-view-shot';
+import CenteredKeyboardFormModal from '../components/CenteredKeyboardFormModal';
 import NotebookLayout from '../components/NotebookLayout';
 import { useMemoFont } from '../src/context/MemoFontContext';
 import { useMood } from '../src/context/MoodContext';
@@ -1048,63 +1048,53 @@ export default function GalleryScreen() {
         </View>
       </View>
 
-      <Modal
+      <CenteredKeyboardFormModal
         visible={memoModalVisible}
-        transparent
-        animationType="fade"
         onRequestClose={closeMemoModalDiscard}
+        onBackdropPress={closeMemoModalDiscard}
+        bottomInset={insets.bottom}
+        backdropColor="rgba(15, 23, 42, 0.4)"
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+        scrollEnabled={false}
+        keyboardAware
       >
-        <KeyboardAvoidingView
-          style={styles.modalRoot}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+        <Pressable
+          style={styles.memoModalCard}
+          onPress={(e) => e.stopPropagation()}
         >
-          <Pressable
-            style={styles.modalBackdropFixed}
-            onPress={closeMemoModalDiscard}
-            accessibilityRole="button"
-            accessibilityLabel="닫기"
+          <Text style={styles.memoModalTitle}>한 줄 메모</Text>
+          <TextInput
+            ref={memoModalInputRef}
+            value={memoDraft}
+            onChangeText={setMemoDraft}
+            placeholder="오늘 하루를 한 줄로 남겨보세요"
+            placeholderTextColor={notebook.inkLight}
+            maxLength={100}
+            multiline
+            scrollEnabled
+            style={styles.memoModalInput}
+            keyboardAppearance="light"
           />
-          <View style={styles.modalCardHost} pointerEvents="box-none">
+          <View style={styles.memoModalActions}>
             <Pressable
-              style={[styles.memoModalCard, { paddingBottom: insets.bottom + 16 }]}
-              onPress={(e) => e.stopPropagation()}
+              onPress={closeMemoModalDiscard}
+              style={({ pressed }) => [styles.memoModalBtn, pressed && { opacity: 0.75 }]}
+              accessibilityRole="button"
+              accessibilityLabel="취소"
             >
-              <Text style={styles.memoModalTitle}>한 줄 메모</Text>
-              <TextInput
-                ref={memoModalInputRef}
-                value={memoDraft}
-                onChangeText={setMemoDraft}
-                placeholder="오늘 하루를 한 줄로 남겨보세요"
-                placeholderTextColor={notebook.inkLight}
-                maxLength={100}
-                multiline
-                scrollEnabled
-                style={styles.memoModalInput}
-                keyboardAppearance="light"
-              />
-              <View style={styles.memoModalActions}>
-                <Pressable
-                  onPress={closeMemoModalDiscard}
-                  style={({ pressed }) => [styles.memoModalBtn, pressed && { opacity: 0.75 }]}
-                  accessibilityRole="button"
-                  accessibilityLabel="취소"
-                >
-                  <Text style={styles.modalCancelText}>취소</Text>
-                </Pressable>
-                <Pressable
-                  onPress={saveMemoFromModal}
-                  style={({ pressed }) => [styles.memoModalBtn, pressed && { opacity: 0.85 }]}
-                  accessibilityRole="button"
-                  accessibilityLabel="저장"
-                >
-                  <Text style={styles.memoModalSaveText}>저장</Text>
-                </Pressable>
-              </View>
+              <Text style={styles.modalCancelText}>취소</Text>
+            </Pressable>
+            <Pressable
+              onPress={saveMemoFromModal}
+              style={({ pressed }) => [styles.memoModalBtn, pressed && { opacity: 0.85 }]}
+              accessibilityRole="button"
+              accessibilityLabel="저장"
+            >
+              <Text style={styles.memoModalSaveText}>저장</Text>
             </Pressable>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        </Pressable>
+      </CenteredKeyboardFormModal>
 
       <Modal
         visible={emotionModalVisible}

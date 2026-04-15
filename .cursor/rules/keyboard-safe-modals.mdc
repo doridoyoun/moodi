@@ -1,0 +1,19 @@
+---
+description: Keyboard-safe modals with TextInput use the shared modal shell components
+alwaysApply: true
+---
+
+# Keyboard-safe modal shells
+
+When adding or editing a **Modal** that includes **TextInput** (or multiline fields that need keyboard avoidance):
+
+1. Prefer **`components/BaseKeyboardSafeModal.js`** when you need custom layout, `scrollEnabled`, `variant` (`centered` | `bottom-sheet`), `keyboardAware`, `hostStyle`, `contentContainerStyle`, `cardStyle`, etc.
+
+2. For a **centered card + form** pattern, use **`components/CenteredKeyboardFormModal.js`** (thin preset over the base).
+
+3. For a **bottom-aligned sheet** pattern, use **`components/BottomSheetKeyboardFormModal.js`**.
+
+Do **not** re-wire raw `Modal` + `KeyboardAvoidingView` + `ScrollView` + backdrop in feature screens unless there is a documented exception.
+
+- Android: always use `behavior="height"` when keyboard-aware (handled by the base).
+- Short modals that should not scroll: pass **`scrollEnabled={false}`** on the base or centered wrapper.

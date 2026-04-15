@@ -2,16 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
-  Dimensions,
   Keyboard,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,65 +21,27 @@ import {
   Heart,
   Leaf,
   Smile,
-  X,
 } from 'lucide-react-native';
+import EntryDetailModalCard from '../components/timeline/EntryDetailModalCard';
+import HourEntryActions from '../components/timeline/HourEntryActions';
+import HourInspectOverlay from '../components/timeline/HourInspectOverlay';
 import NotebookLayout from '../components/NotebookLayout';
 import { useMood } from '../src/context/MoodContext';
-import { moodOrder, moodPalette, notebook, timelineSlotOverrides } from '../constants/theme';
+import { moodOrder, moodPalette, notebook } from '../constants/theme';
 import { formatDateKeyForDisplay, getEntriesForDate, toDateKey } from '../storage/timelineStateStorage';
 import {
   markFirstEmotionRecorded,
   shouldShowFirstEmotionGuidance,
 } from '../storage/firstEmotionGuidanceStorage';
+import { countTitledMemos, joinMemo, paletteFor, splitMemo } from '../utils/timelineEntryFormat';
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
-
-const SCREEN_W = Dimensions.get('window').width;
-const SCREEN_H = Dimensions.get('window').height;
 
 /**
  * Rolling window: at most this many moods per hour cell, always the most recent by time.
  * Left = oldest visible, right = newest visible; older entries drop off the left when > 4.
  */
 const ROLLING_MOOD_WINDOW = 4;
-
-/** Stored memo: first line = title, rest = content */
-function splitMemo(memo) {
-  const raw = typeof memo === 'string' ? memo : '';
-  if (!raw.trim()) return { title: '', content: '' };
-  const nl = raw.indexOf('\n');
-  if (nl === -1) return { title: raw.trim(), content: '' };
-  return {
-    title: raw.slice(0, nl).trim(),
-    content: raw.slice(nl + 1).trim(),
-  };
-}
-
-function joinMemo(title, content) {
-  const t = (title || '').trim();
-  const c = (content || '').trim();
-  if (!t && !c) return '';
-  if (!c) return t;
-  if (!t) return c;
-  return `${t}\n${c}`;
-}
-
-function formatEntryTime(iso) {
-  const d = new Date(iso);
-  const h = String(d.getHours()).padStart(2, '0');
-  const m = String(d.getMinutes()).padStart(2, '0');
-  return `${h}:${m}`;
-}
-
-/** #RRGGBB + alpha for tinted backgrounds / softer text */
-function hexToRgba(hex, alpha) {
-  const h = (hex || '').replace('#', '');
-  if (h.length !== 6) return `rgba(61, 61, 61, ${alpha})`;
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
 
 /**
  * Smooth horizontal flow: one mood per stop, blended transitions (older → newer, left → right).
@@ -139,15 +96,18 @@ export default function TimelineScreen() {
     updateEntry,
     deleteEntry,
     registerEmotionToastAfterLog,
+    setRepresentativeOverrideForDate,
   } = useMood();
 
   const [activeHour, setActiveHour] = useState(null);
+  const [overlayMode, setOverlayMode] = useState(null);
   const [overlayVisible, setOverlayVisible] = useState(false);
   const [detailEntryId, setDetailEntryId] = useState(null);
   const [isDetailEditing, setIsDetailEditing] = useState(false);
   const [detailEditEmotion, setDetailEditEmotion] = useState('happy');
   const [detailEditTitle, setDetailEditTitle] = useState('');
   const [detailEditContent, setDetailEditContent] = useState('');
+  const [detailEditImageUri, setDetailEditImageUri] = useState(null);
   const [memoPromptEntryId, setMemoPromptEntryId] = useState(null);
   /** UI-only: hour row targeted for next quick emotion (not persisted). */
   const [selectedTimelineHour, setSelectedTimelineHour] = useState(null);
@@ -265,22 +225,41 @@ export default function TimelineScreen() {
     setDetailEditEmotion(e.emotionId);
     setDetailEditTitle(title);
     setDetailEditContent(content);
+    setDetailEditImageUri(e.imageUri && String(e.imageUri).trim() ? e.imageUri.trim() : null);
     setIsDetailEditing(true);
   }, [detailEntry]);
 
   const cancelDetailEdit = useCallback(() => {
     setIsDetailEditing(false);
     Keyboard.dismiss();
-  }, []);
+    if (detailEntry) {
+      setDetailEditImageUri(
+        detailEntry.imageUri && String(detailEntry.imageUri).trim()
+          ? String(detailEntry.imageUri).trim()
+          : null,
+      );
+    }
+  }, [detailEntry]);
 
   const saveDetailEdit = useCallback(() => {
     const e = detailEntry;
     if (!e) return;
     const memo = joinMemo(detailEditTitle, detailEditContent);
-    updateEntry(e.id, { emotionId: detailEditEmotion, memo });
+    const uri =
+      typeof detailEditImageUri === 'string' && detailEditImageUri.trim().length > 0
+        ? detailEditImageUri.trim()
+        : '';
+    updateEntry(e.id, { emotionId: detailEditEmotion, memo, imageUri: uri });
     setIsDetailEditing(false);
     Keyboard.dismiss();
-  }, [detailEditContent, detailEditEmotion, detailEditTitle, detailEntry, updateEntry]);
+  }, [
+    detailEditContent,
+    detailEditEmotion,
+    detailEditImageUri,
+    detailEditTitle,
+    detailEntry,
+    updateEntry,
+  ]);
 
   const closeDetailModal = useCallback(() => {
     if (memoPromptTimerRef.current) {
@@ -290,6 +269,7 @@ export default function TimelineScreen() {
     setMemoPromptEntryId(null);
     setDetailEntryId(null);
     setIsDetailEditing(false);
+    setDetailEditImageUri(null);
     Keyboard.dismiss();
   }, []);
 
@@ -300,6 +280,14 @@ export default function TimelineScreen() {
       closeDetailModal();
     }
   }, [cancelDetailEdit, closeDetailModal, isDetailEditing]);
+
+  const onToggleRepresentativeOverride = useCallback(
+    (next) => {
+      if (!detailEntry) return;
+      setRepresentativeOverrideForDate(detailEntry.id, selectedDate, next);
+    },
+    [detailEntry, selectedDate, setRepresentativeOverrideForDate],
+  );
 
   const confirmDeleteEntry = useCallback(
     (id) => {
@@ -334,24 +322,30 @@ export default function TimelineScreen() {
       if (finished) {
         setOverlayVisible(false);
         setActiveHour(null);
+        setOverlayMode(null);
       }
     });
   }, [overlayFade, overlaySlide]);
 
   const openEntryOverlayForHour = useCallback(
-    (hour) => {
-      if (overlayVisible && activeHour === hour) {
+    (hour, mode) => {
+      if (overlayVisible && activeHour === hour && overlayMode === mode) {
         closeEntryOverlay();
         return;
       }
+      if (overlayVisible && activeHour === hour && overlayMode !== mode) {
+        setOverlayMode(mode);
+        return;
+      }
       setActiveHour(hour);
+      setOverlayMode(mode);
       setOverlayVisible(true);
     },
-    [activeHour, closeEntryOverlay, overlayVisible],
+    [activeHour, closeEntryOverlay, overlayMode, overlayVisible],
   );
 
   useEffect(() => {
-    if (!overlayVisible || activeHour === null) return;
+    if (!overlayVisible || activeHour === null || overlayMode === null) return;
     overlayFade.setValue(0);
     overlaySlide.setValue(10);
     Animated.parallel([
@@ -374,11 +368,13 @@ export default function TimelineScreen() {
     return [...list].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
   }, [overlayVisible, activeHour, getEntriesForHour, entries]);
 
-  const overlayTitledEntries = useMemo(
-    () =>
-      overlaySortedEntries.filter((e) => (splitMemo(e.memo).title || '').trim().length > 0),
-    [overlaySortedEntries],
-  );
+  const overlayMemoEntriesDesc = useMemo(() => {
+    if (!overlayVisible || activeHour === null) return [];
+    const list = getEntriesForHour(activeHour);
+    return list
+      .filter((e) => (splitMemo(e.memo).title || '').trim().length > 0)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  }, [overlayVisible, activeHour, getEntriesForHour, entries]);
 
   const openDetailFromOverlay = useCallback(
     (entryId) => {
@@ -404,6 +400,7 @@ export default function TimelineScreen() {
     setDetailEditEmotion(e.emotionId);
     setDetailEditTitle(title);
     setDetailEditContent(content);
+    setDetailEditImageUri(e.imageUri && String(e.imageUri).trim() ? e.imageUri.trim() : null);
     setIsDetailEditing(true);
   }, [entries, memoPromptEntryId]);
 
@@ -555,19 +552,12 @@ export default function TimelineScreen() {
     };
   }, [isToday, selectedDate, scrollToCurrentHour]);
 
-  const detailSplit = detailEntry ? splitMemo(detailEntry.memo) : { title: '', content: '' };
-  const detailEmotionLabel =
-    detailEntry && moodPalette[detailEntry.emotionId]
-      ? moodPalette[detailEntry.emotionId].label
-      : '';
-  const detailEmotionPal = detailEntry
-    ? moodPalette[detailEntry.emotionId] ?? moodPalette.happy
-    : moodPalette.happy;
+  const emotionBarBottomPad = Math.max(insets.bottom, 12);
 
   return (
     <NotebookLayout
       footer={
-        <View style={styles.footerWrap}>
+        <View style={[styles.footerWrap, { paddingBottom: emotionBarBottomPad }]}>
           {memoPromptEntryId ? (
             <View style={styles.memoPromptCard}>
               <Text style={styles.memoPromptLine}>감정이 기록됐어요</Text>
@@ -725,8 +715,11 @@ export default function TimelineScreen() {
               key={hour}
               hour={hour}
               hourEntries={getEntriesForHour(hour)}
-              overlayOpen={overlayVisible && activeHour === hour}
-              onToggleOverlay={() => openEntryOverlayForHour(hour)}
+              overlayVisible={overlayVisible}
+              activeHour={activeHour}
+              overlayMode={overlayMode}
+              onOpenEmotionInspect={() => openEntryOverlayForHour(hour, 'emotion')}
+              onOpenMemoInspect={() => openEntryOverlayForHour(hour, 'memo')}
               onLayoutHour={(y, height) => {
                 hourYRef.current[hour] = y;
                 hourRowHeightRef.current = height;
@@ -744,249 +737,61 @@ export default function TimelineScreen() {
           />
         </ScrollView>
 
-        {overlayVisible && activeHour !== null ? (
-          <View style={styles.entryOverlayRoot} pointerEvents="box-none">
-            <Animated.View
-              style={[styles.entryOverlayDim, { opacity: overlayFade }]}
-              pointerEvents="auto"
-            >
-              <Pressable style={StyleSheet.absoluteFillObject} onPress={closeEntryOverlay} />
-            </Animated.View>
-            <View pointerEvents="box-none" style={styles.entryOverlayCardWrap}>
-              <Animated.View
-                style={[
-                  styles.entryOverlayCard,
-                  {
-                    opacity: overlayFade,
-                    transform: [{ translateY: overlaySlide }],
-                  },
-                ]}
-              >
-                <Text style={styles.entryOverlayHeading}>
-                  {String(activeHour).padStart(2, '0')}:00 메모
-                </Text>
-                <ScrollView
-                  style={styles.entryOverlayList}
-                  nestedScrollEnabled
-                  keyboardShouldPersistTaps="handled"
-                  showsVerticalScrollIndicator={false}
-                >
-                  {overlayTitledEntries.length === 0 ? (
-                    <Text style={styles.entryOverlayEmpty}>아직 메모가 없어요</Text>
-                  ) : (
-                    overlayTitledEntries.map((entry) => {
-                      const { title } = splitMemo(entry.memo);
-                      const titleLine = (title || '').trim();
-                      return (
-                        <Pressable
-                          key={entry.id}
-                          onPress={() => openDetailFromOverlay(entry.id)}
-                          style={({ pressed }) => [
-                            styles.entryOverlayRow,
-                            pressed && styles.entryOverlayRowPressed,
-                          ]}
-                          accessibilityLabel={titleLine}
-                        >
-                          <Text
-                            style={styles.entryOverlayItemLine}
-                            numberOfLines={1}
-                            ellipsizeMode="tail"
-                          >
-                            {titleLine}
-                          </Text>
-                        </Pressable>
-                      );
-                    })
-                  )}
-                </ScrollView>
-              </Animated.View>
-            </View>
-          </View>
-        ) : null}
+        <HourInspectOverlay
+          overlayVisible={overlayVisible}
+          activeHour={activeHour}
+          overlayMode={overlayMode}
+          emotionEntriesChronAsc={overlaySortedEntries}
+          memoEntriesNewestFirst={overlayMemoEntriesDesc}
+          overlayFade={overlayFade}
+          overlaySlide={overlaySlide}
+          onDismissBackdrop={closeEntryOverlay}
+          onSelectEntry={openDetailFromOverlay}
+        />
       </View>
 
-      <Modal
+      <EntryDetailModalCard
         visible={detailEntry != null}
-        animationType="slide"
-        presentationStyle="fullScreen"
+        entry={detailEntry}
+        isDetailEditing={isDetailEditing}
+        detailEditEmotion={detailEditEmotion}
+        setDetailEditEmotion={setDetailEditEmotion}
+        detailEditTitle={detailEditTitle}
+        setDetailEditTitle={setDetailEditTitle}
+        detailEditContent={detailEditContent}
+        setDetailEditContent={setDetailEditContent}
+        bottomInset={insets.bottom}
+        onClose={closeDetailModal}
         onRequestClose={onDetailModalRequestClose}
-      >
-        <View
-          style={[
-            styles.detailModalRoot,
-            { paddingTop: insets.top + 10 },
-          ]}
-        >
-          <View style={styles.detailHeader}>
-            <Pressable
-              onPress={closeDetailModal}
-              style={styles.detailCloseBtn}
-              accessibilityRole="button"
-              accessibilityLabel="닫기"
-            >
-              <X size={26} color={notebook.ink} strokeWidth={2} />
-            </Pressable>
-          </View>
-          {detailEntry && !isDetailEditing ? (
-            <>
-              <ScrollView
-                style={styles.detailScroll}
-                contentContainerStyle={styles.detailScrollContent}
-                keyboardShouldPersistTaps="handled"
-              >
-                <View style={styles.detailMetaRow}>
-                  <View
-                    style={[
-                      styles.detailEmotionPill,
-                      {
-                        backgroundColor: hexToRgba(detailEmotionPal.bg, 0.22),
-                        borderColor: hexToRgba(detailEmotionPal.border, 0.35),
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.detailEmotionPillLabel, { color: detailEmotionPal.ink }]}>
-                      {detailEmotionLabel}
-                    </Text>
-                  </View>
-                  <Text
-                    style={[
-                      styles.detailTimeText,
-                      { color: hexToRgba(detailEmotionPal.ink, 0.62) },
-                    ]}
-                  >
-                    {formatEntryTime(detailEntry.createdAt)}
-                  </Text>
-                </View>
-                {detailSplit.title ? (
-                  <Text style={styles.detailTitle}>{detailSplit.title}</Text>
-                ) : null}
-                {detailSplit.content ? (
-                  <Text style={styles.detailBody}>{detailSplit.content}</Text>
-                ) : !detailSplit.title ? (
-                  <Text style={styles.detailBodyMuted}>(내용 없음)</Text>
-                ) : null}
-              </ScrollView>
-              <View
-                style={[
-                  styles.detailFooter,
-                  { paddingBottom: insets.bottom + 16 },
-                ]}
-              >
-                <Pressable
-                  style={({ pressed }) => [styles.detailBtnSecondary, pressed && { opacity: 0.88 }]}
-                  onPress={beginDetailEdit}
-                >
-                  <Text style={styles.detailBtnSecondaryText}>수정</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [styles.detailBtnDanger, pressed && { opacity: 0.88 }]}
-                  onPress={() => detailEntry && confirmDeleteEntry(detailEntry.id)}
-                >
-                  <Text style={styles.detailBtnDangerText}>삭제</Text>
-                </Pressable>
-              </View>
-            </>
-          ) : null}
-          {detailEntry && isDetailEditing ? (
-            <KeyboardAvoidingView
-              style={styles.detailEditKeyboard}
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            >
-              <ScrollView
-                style={styles.detailScroll}
-                contentContainerStyle={styles.detailEditScrollContent}
-                keyboardShouldPersistTaps="handled"
-              >
-                <View style={styles.detailEditEmotionRow}>
-                  {moodOrder.map((key) => {
-                    const Icon = moodIcons[key];
-                    const m = moodPalette[key];
-                    const selected = detailEditEmotion === key;
-                    return (
-                      <Pressable
-                        key={key}
-                        accessibilityRole="button"
-                        accessibilityLabel={m.label}
-                        onPress={() => setDetailEditEmotion(key)}
-                        style={({ pressed }) => [
-                          styles.detailEditFab,
-                          { backgroundColor: m.bg, borderColor: m.border },
-                          selected && styles.detailEditFabSelected,
-                          pressed && { opacity: 0.88 },
-                        ]}
-                      >
-                        <Icon size={17} color={m.ink} strokeWidth={2} />
-                        <Text style={[styles.detailEditFabLabel, { color: m.ink }]}>{m.label}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-                <TextInput
-                  style={styles.detailEditTitleInput}
-                  placeholder="제목 (선택)"
-                  placeholderTextColor={notebook.inkLight}
-                  value={detailEditTitle}
-                  onChangeText={setDetailEditTitle}
-                  maxLength={200}
-                />
-                <TextInput
-                  style={styles.detailEditMemoInput}
-                  placeholder="내용 (선택)"
-                  placeholderTextColor={notebook.inkLight}
-                  value={detailEditContent}
-                  onChangeText={setDetailEditContent}
-                  multiline
-                  maxLength={500}
-                />
-              </ScrollView>
-              <View
-                style={[
-                  styles.detailFooter,
-                  { paddingBottom: insets.bottom + 16 },
-                ]}
-              >
-                <Pressable
-                  style={({ pressed }) => [styles.detailBtnSecondary, pressed && { opacity: 0.88 }]}
-                  onPress={cancelDetailEdit}
-                >
-                  <Text style={styles.detailBtnSecondaryText}>취소</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [styles.detailBtnPrimaryFull, pressed && { opacity: 0.9 }]}
-                  onPress={saveDetailEdit}
-                >
-                  <Text style={styles.detailBtnPrimaryFullText}>저장</Text>
-                </Pressable>
-              </View>
-            </KeyboardAvoidingView>
-          ) : null}
-        </View>
-      </Modal>
+        onBeginEdit={beginDetailEdit}
+        onCancelEdit={cancelDetailEdit}
+        onSaveEdit={saveDetailEdit}
+        onConfirmDelete={confirmDeleteEntry}
+        isRepresentativeOverride={detailEntry?.isRepresentativeOverride === true}
+        onToggleRepresentativeOverride={onToggleRepresentativeOverride}
+        detailEditImageUri={detailEditImageUri}
+        setDetailEditImageUri={setDetailEditImageUri}
+      />
     </NotebookLayout>
   );
-}
-
-function countTitledMemos(entriesList) {
-  let n = 0;
-  for (const e of entriesList) {
-    const { title } = splitMemo(e.memo);
-    if ((title || '').trim()) n += 1;
-  }
-  return n;
 }
 
 function HourRowBlock({
   hour,
   hourEntries,
-  overlayOpen,
-  onToggleOverlay,
+  overlayVisible,
+  activeHour,
+  overlayMode,
+  onOpenEmotionInspect,
+  onOpenMemoInspect,
   onLayoutHour,
   slotSelected,
   slotSelectable,
   onPressHourSlot,
 }) {
   const n = hourEntries.length;
-  const titledMemoCount = countTitledMemos(hourEntries);
+  const memoCount = countTitledMemos(hourEntries);
+  const inspectOpen = overlayVisible && activeHour === hour;
 
   return (
     <View
@@ -996,47 +801,43 @@ function HourRowBlock({
         onLayoutHour(y, height);
       }}
     >
-      <Pressable
-        onPress={() => onPressHourSlot(hour)}
-        disabled={!slotSelectable}
-        style={({ pressed }) => [
-          styles.hourRowPressable,
-          pressed && slotSelectable && styles.hourRowPressablePressed,
-        ]}
-        accessibilityRole={slotSelectable ? 'button' : undefined}
-        accessibilityLabel={`${String(hour).padStart(2, '0')}시 시간대 선택`}
-      >
-        <View style={styles.hourRow}>
-        <View style={styles.hourLabelWrap}>
-          <Text style={styles.hourLabel}>
-            {String(hour).padStart(2, '0')}:00
-          </Text>
-        </View>
-        <View style={styles.chunkColFrame}>
-          <View style={styles.chunkCol}>
-          <View style={styles.chunkRow} accessibilityLabel={`${String(hour).padStart(2, '0')}시 감정 줄`}>
-            <EntryStrip hourEntries={hourEntries} stripSelected={slotSelected} />
+      <View style={styles.hourRow}>
+        <Pressable
+          onPress={() => onPressHourSlot(hour)}
+          disabled={!slotSelectable}
+          style={({ pressed }) => [
+            styles.hourRowPressableInner,
+            pressed && slotSelectable && styles.hourRowPressablePressed,
+          ]}
+          accessibilityRole={slotSelectable ? 'button' : undefined}
+          accessibilityLabel={`${String(hour).padStart(2, '0')}시 시간대 선택`}
+        >
+          <View style={styles.hourLabelWrap}>
+            <Text style={styles.hourLabel}>
+              {String(hour).padStart(2, '0')}:00
+            </Text>
           </View>
-          {n > 0 ? (
-            <Pressable
-              onPress={onToggleOverlay}
-              style={styles.entrySummaryTap}
-              accessibilityRole="button"
-              accessibilityLabel={overlayOpen ? '메모 닫기' : '메모 보기'}
-            >
-              <Text style={styles.entrySummaryText}>
-                {overlayOpen
-                  ? '메모 닫기 ▲'
-                  : titledMemoCount > 0
-                    ? `메모 보기 (${titledMemoCount}) ▼`
-                    : '메모 보기 ▼'}
-              </Text>
-            </Pressable>
-          ) : null}
+          <View style={styles.chunkColFrame}>
+            <View style={styles.chunkCol}>
+              <View style={styles.chunkRow} accessibilityLabel={`${String(hour).padStart(2, '0')}시 감정 줄`}>
+                <EntryStrip hourEntries={hourEntries} stripSelected={slotSelected} />
+              </View>
+            </View>
           </View>
+        </Pressable>
+      </View>
+      {n > 0 ? (
+        <View style={styles.hourEntryActionsWrap}>
+          <HourEntryActions
+            entryCount={n}
+            memoCount={memoCount}
+            inspectOpen={inspectOpen}
+            inspectMode={inspectOpen ? overlayMode : null}
+            onPressEmotion={onOpenEmotionInspect}
+            onPressMemo={onOpenMemoInspect}
+          />
         </View>
-        </View>
-      </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -1102,14 +903,6 @@ function EntryStrip({ hourEntries, stripSelected }) {
   );
 }
 
-function paletteFor(emotionId) {
-  const base = moodPalette[emotionId] ? { ...moodPalette[emotionId] } : { ...moodPalette.happy };
-  const o = timelineSlotOverrides[emotionId];
-  if (o?.bg) base.bg = o.bg;
-  if (o?.border) base.border = o.border;
-  return base;
-}
-
 const styles = StyleSheet.create({
   titleBlockPressable: {
     alignSelf: 'stretch',
@@ -1172,7 +965,10 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'rgba(79, 70, 229, 0.5)',
   },
-  hourRowPressable: {
+  hourRowPressableInner: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     borderRadius: 12,
   },
   hourRowPressablePressed: {
@@ -1181,6 +977,10 @@ const styles = StyleSheet.create({
   hourRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+  },
+  hourEntryActionsWrap: {
+    marginLeft: 60,
+    paddingRight: 8,
   },
   hourLabelWrap: {
     width: 52,
@@ -1198,83 +998,6 @@ const styles = StyleSheet.create({
   chunkRow: {
     flexDirection: 'row',
     minHeight: 40,
-  },
-  entrySummaryTap: {
-    marginTop: 6,
-    alignSelf: 'flex-start',
-    paddingVertical: 2,
-    paddingHorizontal: 0,
-  },
-  entrySummaryText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: notebook.inkMuted,
-  },
-  entryOverlayRoot: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 999,
-  },
-  entryOverlayDim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.25)',
-  },
-  entryOverlayCardWrap: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 51,
-  },
-  entryOverlayCard: {
-    width: SCREEN_W * 0.85,
-    maxHeight: SCREEN_H * 0.48,
-    backgroundColor: 'rgba(255,255,255,0.98)',
-    borderRadius: 16,
-    paddingVertical: 18,
-    paddingHorizontal: 18,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.1,
-    shadowRadius: 24,
-    elevation: 10,
-  },
-  entryOverlayHeading: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: notebook.ink,
-    letterSpacing: 0.15,
-    marginBottom: 14,
-  },
-  entryOverlayList: {
-    maxHeight: SCREEN_H * 0.36,
-  },
-  entryOverlayRow: {
-    paddingVertical: 8,
-    marginBottom: 6,
-  },
-  entryOverlayRowPressed: {
-    opacity: 0.85,
-  },
-  entryOverlayItemLine: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: notebook.ink,
-    lineHeight: 22,
-  },
-  entryOverlayEmpty: {
-    fontSize: 13,
-    color: notebook.inkLight,
-    textAlign: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    lineHeight: 20,
   },
   chunk: {
     flex: 1,
@@ -1423,7 +1146,6 @@ const styles = StyleSheet.create({
   footerWrap: {
     paddingHorizontal: 12,
     paddingTop: 10,
-    paddingBottom: 12,
   },
   footerHints: {
     marginBottom: 10,
@@ -1457,182 +1179,5 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 10,
     fontWeight: '600',
-  },
-  detailModalRoot: {
-    flex: 1,
-    backgroundColor: notebook.bg,
-  },
-  detailHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingBottom: 4,
-  },
-  detailCloseBtn: {
-    minWidth: 40,
-    minHeight: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  detailScroll: {
-    flex: 1,
-  },
-  detailScrollContent: {
-    paddingHorizontal: 22,
-    paddingBottom: 24,
-  },
-  detailMetaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 20,
-  },
-  detailEmotionPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  detailEmotionPillLabel: {
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: -0.2,
-  },
-  detailTimeText: {
-    fontSize: 15,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  detailTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: notebook.ink,
-    lineHeight: 30,
-    marginBottom: 16,
-  },
-  detailBody: {
-    fontSize: 16,
-    lineHeight: 26,
-    color: notebook.ink,
-  },
-  detailBodyMuted: {
-    fontSize: 15,
-    color: notebook.inkLight,
-    fontStyle: 'italic',
-  },
-  detailFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: notebook.gridLine,
-    backgroundColor: 'rgba(255,255,255,0.6)',
-  },
-  detailBtnSecondary: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: notebook.gridLine,
-    backgroundColor: '#fff',
-  },
-  detailBtnSecondaryText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: notebook.ink,
-  },
-  detailBtnDanger: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: 'rgba(180, 40, 40, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(180, 40, 40, 0.35)',
-  },
-  detailBtnDangerText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#b91c1c',
-  },
-  detailEditKeyboard: {
-    flex: 1,
-  },
-  detailEditScrollContent: {
-    paddingHorizontal: 22,
-    paddingBottom: 24,
-  },
-  detailEditEmotionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'stretch',
-    marginBottom: 16,
-  },
-  detailEditFab: {
-    flex: 1,
-    minWidth: 0,
-    marginHorizontal: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 7,
-    paddingHorizontal: 1,
-    borderRadius: 999,
-    borderWidth: 1.5,
-  },
-  detailEditFabSelected: {
-    borderWidth: 2.5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.12,
-    shadowRadius: 3,
-  },
-  detailEditFabLabel: {
-    marginTop: 3,
-    fontSize: 8,
-    fontWeight: '600',
-  },
-  detailEditTitleInput: {
-    borderWidth: 1,
-    borderColor: notebook.gridLine,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    fontWeight: '600',
-    color: notebook.ink,
-    backgroundColor: notebook.bg,
-    marginBottom: 10,
-  },
-  detailEditMemoInput: {
-    minHeight: 120,
-    maxHeight: 220,
-    borderWidth: 1,
-    borderColor: notebook.gridLine,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: notebook.ink,
-    backgroundColor: notebook.bg,
-    textAlignVertical: 'top',
-  },
-  detailBtnPrimaryFull: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: notebook.ink,
-  },
-  detailBtnPrimaryFullText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
   },
 });

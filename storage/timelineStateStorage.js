@@ -12,6 +12,9 @@ const TIMELINE_BY_DATE_KEY = 'moodi_timeline_by_date_v1';
  * @property {string} createdAt
  * @property {string} [timelineDateKey] YYYY-MM-DD — timeline day (defaults to date of createdAt if absent)
  * @property {number} [timelineHour] 0–23 — timeline hour slot (defaults to hour of createdAt if absent)
+ * @property {string} [imageUri] optional single photo for this entry
+ * @property {boolean} [isRepresentativeOverride] when true, this entry is the manual daily representative
+ * @property {string} [representativeOverrideAt] ISO time when override was set (tie-break: most recent wins)
  */
 
 /**
@@ -145,7 +148,7 @@ export function formatDateKeyForDisplay(dateKey, locale = 'ko-KR') {
 // --- MoodEntry helpers ---
 
 /**
- * @param {{ id?: string, emotionId?: string, memo?: string, createdAt?: string, timelineDateKey?: string, timelineHour?: number }} input
+ * @param {{ id?: string, emotionId?: string, memo?: string, createdAt?: string, timelineDateKey?: string, timelineHour?: number, imageUri?: string, isRepresentativeOverride?: boolean, representativeOverrideAt?: string }} input
  * @returns {MoodEntry}
  */
 export function createMoodEntry(input = {}) {
@@ -174,6 +177,87 @@ export function createMoodEntry(input = {}) {
   ) {
     entry.timelineHour = Math.floor(input.timelineHour);
   }
+  if (typeof input.imageUri === 'string' && input.imageUri.trim().length > 0) {
+    entry.imageUri = input.imageUri.trim();
+  }
+  if (input.isRepresentativeOverride === true) {
+    entry.isRepresentativeOverride = true;
+    const at =
+      typeof input.representativeOverrideAt === 'string' &&
+      !Number.isNaN(Date.parse(input.representativeOverrideAt))
+        ? input.representativeOverrideAt
+        : new Date().toISOString();
+    entry.representativeOverrideAt = at;
+  }
+  return entry;
+}
+
+/**
+ * Merge updates onto an existing entry (used by persistence / edit flows).
+ * @param {MoodEntry} base
+ * @param {Partial<MoodEntry> & { isRepresentativeOverride?: boolean }} patch
+ * @returns {MoodEntry}
+ */
+export function rebuildMoodEntry(base, patch = {}) {
+  const emotionId =
+    patch.emotionId !== undefined && VALID_EMOTION_IDS.has(String(patch.emotionId))
+      ? String(patch.emotionId)
+      : VALID_EMOTION_IDS.has(String(base.emotionId))
+        ? String(base.emotionId)
+        : 'happy';
+  const memo =
+    patch.memo !== undefined
+      ? typeof patch.memo === 'string'
+        ? patch.memo.trim()
+        : ''
+      : base.memo ?? '';
+  const createdAt = base.createdAt;
+  const id = base.id;
+  /** @type {MoodEntry} */
+  const entry = { id, emotionId, memo, createdAt };
+
+  const dk =
+    patch.timelineDateKey !== undefined ? patch.timelineDateKey : base.timelineDateKey;
+  if (typeof dk === 'string' && parseDateKey(dk.trim())) {
+    entry.timelineDateKey = dk.trim();
+  }
+
+  const th = patch.timelineHour !== undefined ? patch.timelineHour : base.timelineHour;
+  if (typeof th === 'number' && Number.isFinite(th) && th >= 0 && th <= 23) {
+    entry.timelineHour = Math.floor(th);
+  }
+
+  let nextUri = base.imageUri;
+  if (patch.imageUri !== undefined) {
+    nextUri =
+      typeof patch.imageUri === 'string' && patch.imageUri.trim().length > 0
+        ? patch.imageUri.trim()
+        : undefined;
+  }
+  if (nextUri) entry.imageUri = nextUri;
+
+  if (patch.isRepresentativeOverride === true) {
+    entry.isRepresentativeOverride = true;
+    const at =
+      typeof patch.representativeOverrideAt === 'string' &&
+      !Number.isNaN(Date.parse(patch.representativeOverrideAt))
+        ? patch.representativeOverrideAt
+        : new Date().toISOString();
+    entry.representativeOverrideAt = at;
+  } else if (patch.isRepresentativeOverride === false) {
+    // omit override fields
+  } else if (base.isRepresentativeOverride === true) {
+    entry.isRepresentativeOverride = true;
+    if (
+      typeof base.representativeOverrideAt === 'string' &&
+      !Number.isNaN(Date.parse(base.representativeOverrideAt))
+    ) {
+      entry.representativeOverrideAt = base.representativeOverrideAt;
+    } else {
+      entry.representativeOverrideAt = base.createdAt;
+    }
+  }
+
   return entry;
 }
 
@@ -240,6 +324,20 @@ export function normalizeMoodEntries(raw) {
     ) {
       normalized.timelineHour = Math.floor(row.timelineHour);
     }
+    if (typeof row.imageUri === 'string' && row.imageUri.trim().length > 0) {
+      normalized.imageUri = row.imageUri.trim();
+    }
+    if (row.isRepresentativeOverride === true) {
+      normalized.isRepresentativeOverride = true;
+      if (
+        typeof row.representativeOverrideAt === 'string' &&
+        !Number.isNaN(Date.parse(row.representativeOverrideAt))
+      ) {
+        normalized.representativeOverrideAt = row.representativeOverrideAt;
+      } else {
+        normalized.representativeOverrideAt = normalized.createdAt;
+      }
+    }
     out.push(normalized);
   }
   return out.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
@@ -294,6 +392,7 @@ export function getEntriesForDateHour(entries, dateKey, hour) {
  * @param {MoodEntry[]} entries
  * @param {string} dateKey
  * @returns {string[]} up to 2 ids
+ * Tie on count: emotion whose most recent entry that day is latest wins (same ordering as calendar + daily analysis).
  */
 export function computeTopTwoEmotionIdsFromEntries(entries, dateKey) {
   const day = getEntriesForDate(entries, dateKey);
@@ -302,12 +401,12 @@ export function computeTopTwoEmotionIdsFromEntries(entries, dateKey) {
   const byEmotion = {};
   for (const e of day) {
     const id = VALID_EMOTION_IDS.has(e.emotionId) ? e.emotionId : 'happy';
+    const t = Date.parse(e.createdAt);
     if (!byEmotion[id]) {
-      byEmotion[id] = { count: 0, firstAt: Date.parse(e.createdAt) };
+      byEmotion[id] = { count: 0, lastAt: t };
     }
     byEmotion[id].count += 1;
-    const t = Date.parse(e.createdAt);
-    if (t < byEmotion[id].firstAt) byEmotion[id].firstAt = t;
+    if (t > byEmotion[id].lastAt) byEmotion[id].lastAt = t;
   }
 
   const ids = Object.keys(byEmotion);
@@ -315,7 +414,7 @@ export function computeTopTwoEmotionIdsFromEntries(entries, dateKey) {
     const ca = byEmotion[a].count;
     const cb = byEmotion[b].count;
     if (cb !== ca) return cb - ca;
-    return byEmotion[a].firstAt - byEmotion[b].firstAt;
+    return byEmotion[b].lastAt - byEmotion[a].lastAt;
   });
   return ids.slice(0, 2);
 }

@@ -1,9 +1,8 @@
 import { StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Calendar, Clock, Image as ImageIcon } from 'lucide-react-native';
+import { Calendar, Clock } from 'lucide-react-native';
 import CalendarStack from './CalendarStack';
-import GalleryStack from './GalleryStack';
 import TimelineScreen from '../screens/TimelineScreen';
 import { notebook } from '../constants/theme';
 
@@ -16,7 +15,7 @@ const TAB_ICON_SIZE = 30;
 
 export default function MainTabs() {
   const insets = useSafeAreaInsets();
-  const bottomPad = insets.bottom + 16;
+  const bottomPad = Math.max(insets.bottom, 12);
 
   return (
     <Tab.Navigator
@@ -56,15 +55,6 @@ export default function MainTabs() {
         options={{
           tabBarIcon: ({ color }) => (
             <Clock color={color} size={TAB_ICON_SIZE} strokeWidth={2} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Gallery"
-        component={GalleryStack}
-        options={{
-          tabBarIcon: ({ color }) => (
-            <ImageIcon color={color} size={TAB_ICON_SIZE} strokeWidth={2} />
           ),
         }}
       />

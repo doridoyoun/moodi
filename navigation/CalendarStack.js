@@ -1,5 +1,6 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import CalendarScreen from '../screens/CalendarScreen';
+import DailyAnalysisScreen from '../screens/DailyAnalysisScreen';
 import MonthlyFlowView from '../screens/MonthlyFlowView';
 import { notebook } from '../constants/theme';
 
@@ -14,6 +15,18 @@ export default function CalendarStack() {
     >
       <Stack.Screen name="CalendarHome" component={CalendarScreen} options={{ headerShown: false }} />
       <Stack.Screen name="MonthlyFlow" component={MonthlyFlowView} options={{ headerShown: false }} />
+      <Stack.Screen
+        name="DailyAnalysis"
+        component={DailyAnalysisScreen}
+        options={{
+          title: '하루 분석',
+          headerShown: true,
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: notebook.bg },
+          headerTintColor: notebook.ink,
+          headerTitleStyle: { fontWeight: '800' },
+        }}
+      />
     </Stack.Navigator>
   );
 }

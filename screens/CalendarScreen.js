@@ -225,12 +225,12 @@ export default function CalendarScreen() {
 
           <View style={styles.selectedDetail}>
             <Text style={styles.selectedDetailTitle}>선택한 날</Text>
-            <View style={styles.selectedPreviewRow}>
-              <Text style={styles.selectedPreviewDate}>{formatShortMd(selectedDate)}</Text>
-              <View style={styles.previewBarWrap}>
-                {selectedDayEmotionTotal === 0 ? (
-                  <View style={styles.previewBarEmpty} />
-                ) : (
+            {selectedDayEmotionTotal === 0 ? (
+              <Text style={styles.selectedEmpty}>기록이 없어요</Text>
+            ) : (
+              <View style={styles.selectedPreviewRow}>
+                <Text style={styles.selectedPreviewDate}>{formatShortMd(selectedDate)}</Text>
+                <View style={styles.previewBarWrap}>
                   <View style={styles.previewBarRow}>
                     {moodOrder.map((emotionId) => {
                       const n = selectedDayEmotionCounts[emotionId] ?? 0;
@@ -248,10 +248,21 @@ export default function CalendarScreen() {
                       );
                     })}
                   </View>
-                )}
+                </View>
               </View>
-            </View>
+            )}
           </View>
+
+          {selectedDayEmotionTotal > 0 ? (
+            <Pressable
+              onPress={() => navigation.navigate('DailyAnalysis')}
+              style={({ pressed }) => [styles.analysisEntry, pressed && styles.analysisEntryPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="선택한 날 하루 분석"
+            >
+              <Text style={styles.analysisEntryText}>하루 분석 보기</Text>
+            </Pressable>
+          ) : null}
 
           <View style={styles.feedbackBlock}>
             <Text style={styles.feedbackText} numberOfLines={2}>
@@ -265,7 +276,7 @@ export default function CalendarScreen() {
             accessibilityRole="button"
             accessibilityLabel="이번 달 전체 감정 흐름 보기"
           >
-            <Text style={styles.flowEntryText}>이번 달 전체 흐름 보기 →</Text>
+            <Text style={styles.flowEntryText}>이번 달 전체 흐름 보기</Text>
           </Pressable>
 
           <View style={styles.legend}>
@@ -392,6 +403,12 @@ const styles = StyleSheet.create({
     color: notebook.inkLight,
     marginBottom: 8,
   },
+  selectedEmpty: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: notebook.inkLight,
+    fontStyle: 'italic',
+  },
   selectedPreviewRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -426,6 +443,22 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.08)',
   },
+  analysisEntry: {
+    marginTop: 12,
+    alignSelf: 'stretch',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    borderRadius: 10,
+  },
+  analysisEntryPressed: {
+    opacity: 0.75,
+  },
+  analysisEntryText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0f766e',
+  },
   feedbackBlock: {
     marginTop: 14,
     paddingTop: 12,
@@ -441,9 +474,11 @@ const styles = StyleSheet.create({
   },
   flowEntry: {
     marginTop: 12,
-    alignSelf: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 4,
+    alignSelf: 'stretch',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    borderRadius: 10,
   },
   flowEntryPressed: {
     opacity: 0.75,
