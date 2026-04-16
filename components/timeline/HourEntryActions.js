@@ -19,10 +19,10 @@ export default function HourEntryActions({
         style={styles.hit}
         hitSlop={6}
         accessibilityRole="button"
-        accessibilityLabel={`감정 보기, ${entryCount}건`}
+        accessibilityLabel={`감정 흐름 보기, ${entryCount}건`}
       >
         <Text style={[styles.label, emotionActive && styles.labelActive]}>
-          {emotionActive ? `감정 보기 (${entryCount}) ▲` : `감정 보기 (${entryCount}) ▼`}
+          {emotionActive ? `감정 흐름 (${entryCount}) ▲` : `감정 흐름 (${entryCount}) ▼`}
         </Text>
       </Pressable>
       <Text style={styles.sep}>·</Text>
@@ -31,10 +31,10 @@ export default function HourEntryActions({
         style={styles.hit}
         hitSlop={6}
         accessibilityRole="button"
-        accessibilityLabel={`메모 보기, ${memoCount}건`}
+        accessibilityLabel={`메모 모아보기, ${memoCount}건`}
       >
         <Text style={[styles.label, memoActive && styles.labelActive]}>
-          {memoActive ? `메모 보기 (${memoCount}) ▲` : `메모 보기 (${memoCount}) ▼`}
+          {memoActive ? `메모 모아보기 (${memoCount}) ▲` : `메모 모아보기 (${memoCount}) ▼`}
         </Text>
       </Pressable>
     </View>

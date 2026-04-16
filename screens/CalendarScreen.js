@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Surface } from 'react-native-paper';
@@ -14,11 +14,8 @@ import {
   toDateKey,
 } from '../storage/timelineStateStorage';
 import { countEmotionsByTopCategoryForDay } from '../utils/monthlyFlowHelpers';
-import {
-  getMoodiFeedback,
-  getMoodEntriesRecentDays,
-  moodiFeedbackRecordsFromMoodEntries,
-} from '../utils/moodiCalendarFeedback';
+import { computeDailyAnalysis } from '../utils/dailyAnalysis';
+import { formatEntryTime, splitMemo } from '../utils/timelineEntryFormat';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -92,20 +89,75 @@ export default function CalendarScreen() {
     [selectedDayEmotionCounts],
   );
 
-  const selectedDateRecords = useMemo(
-    () => moodiFeedbackRecordsFromMoodEntries(getEntriesForDate(entries, selectedDate)),
+  const analysis = useMemo(
+    () => computeDailyAnalysis(entries, selectedDate),
     [entries, selectedDate],
   );
 
-  const recentRecords = useMemo(
-    () => moodiFeedbackRecordsFromMoodEntries(getMoodEntriesRecentDays(entries, 7)),
-    [entries],
-  );
+  const summaryText = useMemo(() => {
+    const s = typeof analysis?.oneLineSummary === 'string' ? analysis.oneLineSummary.trim() : '';
+    return s || '아직 이 날의 요약이 없어요';
+  }, [analysis]);
 
-  const feedbackLine = useMemo(
-    () => getMoodiFeedback(selectedDateRecords, recentRecords),
-    [selectedDateRecords, recentRecords],
-  );
+  const repEmotionId =
+    analysis?.representativeEmotion && typeof analysis.representativeEmotion === 'string'
+      ? analysis.representativeEmotion
+      : null;
+  const memoSource = analysis?.representativeMemoSource ?? null;
+
+  const repMemoRaw =
+    analysis?.representativeMemo && typeof analysis.representativeMemo === 'string'
+      ? analysis.representativeMemo
+      : '';
+  const hasRepresentativeMemo = repMemoRaw.trim().length > 0;
+  const repMemoParts = repMemoRaw ? splitMemo(repMemoRaw) : { title: '', content: '' };
+  const repMemoTitle = (repMemoParts.title || '').trim();
+  const repMemoBody = (repMemoParts.content || '').trim();
+
+  const memoEmotionId =
+    memoSource?.emotionId && typeof memoSource.emotionId === 'string' ? memoSource.emotionId : null;
+  const memoEmotionLabel =
+    memoEmotionId && moodPalette[memoEmotionId] ? moodPalette[memoEmotionId].label : '';
+  const memoTimeText =
+    memoSource?.createdAt && typeof memoSource.createdAt === 'string'
+      ? formatEntryTime(memoSource.createdAt)
+      : '';
+
+  const repCardTitle = useMemo(() => {
+    if (repMemoTitle) return repMemoTitle;
+    const src = repMemoBody || repMemoRaw.trim();
+    if (src) {
+      const oneLine = src.split('\n').map((x) => x.trim()).find(Boolean) || '';
+      const clipped = oneLine.length > 30 ? `${oneLine.slice(0, 30).trim()}…` : oneLine;
+      return clipped || (memoEmotionLabel ? `${memoEmotionLabel}` : '');
+    }
+    return memoEmotionLabel ? `${memoEmotionLabel}` : '';
+  }, [memoEmotionLabel, repMemoBody, repMemoRaw, repMemoTitle]);
+
+  const repPhotoUri =
+    analysis?.representativePhotoUri && typeof analysis.representativePhotoUri === 'string'
+      ? analysis.representativePhotoUri
+      : '';
+
+  const repEmotionLabel =
+    repEmotionId && moodPalette[repEmotionId] ? moodPalette[repEmotionId].label : '';
+
+  const repEmotionFallbackText = useMemo(() => {
+    switch (repEmotionId) {
+      case 'happy':
+        return '오늘은 기분 좋은 감정이 가장 많이 남았어요';
+      case 'flutter':
+        return '오늘은 설레는 감정이 가장 많이 남았어요';
+      case 'calm':
+        return '오늘은 잔잔한 감정이 가장 많이 남았어요';
+      case 'gloom':
+        return '오늘은 가라앉은 감정이 가장 많이 남았어요';
+      case 'annoyed':
+        return '오늘은 짜증나는 감정이 가장 많이 남았어요';
+      default:
+        return '이 날의 대표 순간이 아직 없어요';
+    }
+  }, [repEmotionId]);
 
   const shiftMonth = (delta) => {
     setCursor((d) => new Date(d.getFullYear(), d.getMonth() + delta, 1));
@@ -118,10 +170,6 @@ export default function CalendarScreen() {
     if (tabNav) {
       tabNav.navigate('Timeline');
     }
-  };
-
-  const openMonthlyFlow = () => {
-    navigation.navigate('MonthlyFlow', { year, monthIndex });
   };
 
   return (
@@ -253,6 +301,10 @@ export default function CalendarScreen() {
             )}
           </View>
 
+          <View style={styles.calendarSummaryWrap}>
+            <Text style={styles.calendarSummaryText}>{summaryText}</Text>
+          </View>
+
           {selectedDayEmotionTotal > 0 ? (
             <Pressable
               onPress={() => navigation.navigate('DailyAnalysis')}
@@ -264,20 +316,36 @@ export default function CalendarScreen() {
             </Pressable>
           ) : null}
 
-          <View style={styles.feedbackBlock}>
-            <Text style={styles.feedbackText} numberOfLines={2}>
-              {feedbackLine}
-            </Text>
-          </View>
+          {hasRepresentativeMemo ? (
+            <View style={styles.repCardWrap}>
+              <View style={styles.repCardHeader}>
+                <Text style={styles.repCardEmotion}>{memoEmotionLabel}</Text>
+                <Text style={styles.repCardTime}>{memoTimeText}</Text>
+              </View>
 
-          <Pressable
-            onPress={openMonthlyFlow}
-            style={({ pressed }) => [styles.flowEntry, pressed && styles.flowEntryPressed]}
-            accessibilityRole="button"
-            accessibilityLabel="이번 달 전체 감정 흐름 보기"
-          >
-            <Text style={styles.flowEntryText}>이번 달 전체 흐름 보기</Text>
-          </Pressable>
+              {repCardTitle ? <Text style={styles.repCardTitle}>{repCardTitle}</Text> : null}
+
+              {repPhotoUri ? (
+                <Image
+                  source={{ uri: repPhotoUri }}
+                  style={styles.repCardPhoto}
+                  resizeMode="cover"
+                  accessibilityLabel="대표 사진"
+                />
+              ) : null}
+            </View>
+          ) : repEmotionId ? (
+            <View style={styles.repCardWrap}>
+              <View style={styles.repCardHeader}>
+                <Text style={styles.repCardEmotion}>{repEmotionLabel}</Text>
+              </View>
+              <Text style={styles.repCardTitle}>{repEmotionFallbackText}</Text>
+            </View>
+          ) : (
+            <View style={styles.repCardWrap}>
+              <Text style={styles.repEmptyText}>이 날의 대표 순간이 아직 없어요</Text>
+            </View>
+          )}
 
           <View style={styles.legend}>
             {moodOrder.map((k) => {
@@ -443,6 +511,18 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.08)',
   },
+  calendarSummaryWrap: {
+    marginTop: 14,
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  calendarSummaryText: {
+    fontSize: 14,
+    lineHeight: 22,
+    textAlign: 'center',
+    color: notebook.inkMuted,
+    fontWeight: '600',
+  },
   analysisEntry: {
     marginTop: 12,
     alignSelf: 'stretch',
@@ -459,34 +539,47 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0f766e',
   },
-  feedbackBlock: {
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: notebook.gridLine,
+  repCardWrap: {
+    marginTop: 18,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: notebook.gridLine,
+    padding: 16,
   },
-  feedbackText: {
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: '500',
-    color: notebook.inkMuted,
-    textAlign: 'center',
-  },
-  flowEntry: {
-    marginTop: 12,
-    alignSelf: 'stretch',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+  repCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    borderRadius: 10,
+    marginBottom: 10,
   },
-  flowEntryPressed: {
-    opacity: 0.75,
-  },
-  flowEntryText: {
-    fontSize: 14,
+  repCardEmotion: {
+    fontSize: 13,
     fontWeight: '700',
-    color: '#4f46e5',
+    color: notebook.inkMuted,
+  },
+  repCardTime: {
+    fontSize: 12,
+    color: notebook.inkLight,
+  },
+  repCardTitle: {
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: notebook.ink,
+  },
+  repCardPhoto: {
+    width: '100%',
+    aspectRatio: 3 / 4,
+    borderRadius: 12,
+    marginTop: 12,
+    backgroundColor: notebook.gridLine,
+  },
+  repEmptyText: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: notebook.inkLight,
+    textAlign: 'center',
   },
   legend: {
     flexDirection: 'row',

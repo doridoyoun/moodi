@@ -1,12 +1,11 @@
 import { useMemo } from 'react';
-import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import EmotionFlowGraph from '../components/analysis/EmotionFlowGraph';
-import EmotionDisplayToken from '../components/timeline/EmotionDisplayToken';
 import { useMood } from '../src/context/MoodContext';
-import { moodPalette, notebook } from '../constants/theme';
+import { notebook } from '../constants/theme';
 import { computeDailyAnalysis } from '../utils/dailyAnalysis';
-import { formatDateKeyForDisplay } from '../storage/timelineStateStorage';
+import { formatDateKeyForDisplay, getEntriesForDate, getEntryTimelineHour } from '../storage/timelineStateStorage';
 import { formatEntryTime, splitMemo } from '../utils/timelineEntryFormat';
 
 export default function DailyAnalysisScreen() {
@@ -23,15 +22,138 @@ export default function DailyAnalysisScreen() {
     [selectedDate],
   );
 
-  const repPal = analysis?.representativeEmotion
-    ? moodPalette[analysis.representativeEmotion]
-    : null;
+  const dayEntries = useMemo(
+    () => getEntriesForDate(entries, selectedDate),
+    [entries, selectedDate],
+  );
 
-  const memoParts = analysis?.representativeMemo
-    ? splitMemo(analysis.representativeMemo)
-    : { title: '', content: '' };
+  const daySorted = useMemo(
+    () => [...dayEntries].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)),
+    [dayEntries],
+  );
 
-  const memoSource = analysis?.representativeMemoSource;
+  const changePointText = useMemo(() => {
+    if (daySorted.length < 2) return '감정이 크게 바뀌진 않았어요';
+
+    /** @type {number[]} */
+    const hours = [];
+    for (let i = 1; i < daySorted.length; i += 1) {
+      const prev = daySorted[i - 1];
+      const cur = daySorted[i];
+      if (prev?.emotionId !== cur?.emotionId) {
+        hours.push(getEntryTimelineHour(cur));
+      }
+    }
+
+    const uniq = [...new Set(hours.filter((h) => Number.isFinite(h)))];
+    if (uniq.length === 0) return '감정이 크게 바뀌진 않았어요';
+    if (uniq.length === 1) return `${uniq[0]}시에 감정이 바뀌었어요`;
+    if (uniq.length <= 3) return `${uniq.slice(0, 3).map((h) => `${h}시`).join(', ')}에 감정이 바뀌었어요`;
+    return '감정이 여러 번 바뀐 하루예요';
+  }, [daySorted]);
+
+  const concentrationText = useMemo(() => {
+    if (daySorted.length === 0) return '기록이 아직 없어요';
+    if (daySorted.length === 1) {
+      const h = getEntryTimelineHour(daySorted[0]);
+      if (h >= 6 && h <= 11) return '아침에 기록이 있었어요';
+      if (h >= 12 && h <= 17) return '오후에 기록이 있었어요';
+      if (h >= 18 && h <= 23) return '저녁에 기록이 있었어요';
+      return '하루 중 한 번 기록이 있었어요';
+    }
+
+    /** @type {Record<number, number>} */
+    const byHour = {};
+    for (const e of daySorted) {
+      const h = getEntryTimelineHour(e);
+      if (!Number.isFinite(h)) continue;
+      byHour[h] = (byHour[h] || 0) + 1;
+    }
+
+    // Densest 3-hour window (simple + stable).
+    const windowSize = 3;
+    let bestStart = 0;
+    let bestCount = -1;
+    for (let start = 0; start <= 24 - windowSize; start += 1) {
+      let c = 0;
+      for (let h = start; h < start + windowSize; h += 1) c += byHour[h] || 0;
+      if (c > bestCount) {
+        bestCount = c;
+        bestStart = start;
+      }
+    }
+
+    if (bestCount >= 3) {
+      const end = bestStart + windowSize - 1;
+      return `${bestStart}시~${end}시에 기록이 집중되어 있어요`;
+    }
+
+    // Fallback broad label (morning / afternoon / evening) using bucket counts.
+    const countIn = (from, to) => {
+      let c = 0;
+      for (let h = from; h <= to; h += 1) c += byHour[h] || 0;
+      return c;
+    };
+    const morning = countIn(6, 11);
+    const afternoon = countIn(12, 17);
+    const evening = countIn(18, 23);
+
+    const max = Math.max(morning, afternoon, evening);
+    if (max <= 1) return '하루 중 띄엄띄엄 기록됐어요';
+    if (evening === max) return '저녁에 기록이 많았어요';
+    if (afternoon === max) return '오후에 기록이 많았어요';
+    return '아침에 기록이 많았어요';
+  }, [daySorted]);
+
+  const missedMomentItems = useMemo(() => {
+    if (!daySorted.length) return [];
+
+    const rep = analysis?.representativeMemoSource;
+    let repId = null;
+    if (rep?.createdAt && rep?.memo) {
+      const hit = daySorted.find(
+        (e) =>
+          e.createdAt === rep.createdAt &&
+          (e.memo || '').trim() === (rep.memo || '').trim() &&
+          (e.emotionId || '') === (rep.emotionId || ''),
+      );
+      if (hit?.id) repId = hit.id;
+    }
+
+    const memoEntries = daySorted.filter((e) => {
+      const memo = (e.memo || '').trim();
+      if (!memo) return false;
+      if (repId && e.id === repId) return false;
+      return true;
+    });
+
+    const ranked = [...memoEntries].sort((a, b) => {
+      const aParts = splitMemo(a.memo || '');
+      const bParts = splitMemo(b.memo || '');
+      const aHasTitle = (aParts.title || '').trim().length > 0 ? 1 : 0;
+      const bHasTitle = (bParts.title || '').trim().length > 0 ? 1 : 0;
+      if (bHasTitle !== aHasTitle) return bHasTitle - aHasTitle;
+
+      const aLen = (a.memo || '').trim().length;
+      const bLen = (b.memo || '').trim().length;
+      if (bLen !== aLen) return bLen - aLen;
+
+      return Date.parse(b.createdAt) - Date.parse(a.createdAt);
+    });
+
+    return ranked.slice(0, 3).map((e) => {
+      const parts = splitMemo(e.memo || '');
+      const title = (parts.title || '').trim();
+      const body = (parts.content || '').trim() || (e.memo || '').trim();
+      const firstLine = body.split('\n').map((x) => x.trim()).find(Boolean) || '';
+      const titleText = title || (firstLine.length > 36 ? `${firstLine.slice(0, 36).trim()}…` : firstLine) || '메모';
+      return {
+        id: e.id,
+        timeText: formatEntryTime(e.createdAt),
+        titleText,
+      };
+    });
+  }, [analysis?.representativeMemoSource, daySorted]);
 
   return (
     <ScrollView
@@ -49,65 +171,35 @@ export default function DailyAnalysisScreen() {
         </View>
       ) : (
         <>
-          <View style={styles.repCard}>
-            <Text style={styles.repSub}>오늘 가장 많이 느낀 감정</Text>
-            {analysis.representativeEmotion && repPal ? (
-              <View style={styles.repRow}>
-                <View style={[styles.repDot, { backgroundColor: repPal.bg, borderColor: repPal.border }]} />
-                <View style={styles.repTextCol}>
-                  <Text style={[styles.repLabel, { color: repPal.ink }]}>{repPal.label}</Text>
-                  <Text style={styles.repCount}>
-                    {analysis.representativeEmotionCount}회 · 전체 {analysis.totalEntryCount}개 기록
-                  </Text>
-                </View>
-              </View>
-            ) : null}
-          </View>
-
           <View style={styles.card}>
             <Text style={styles.cardTitle}>감정 흐름</Text>
             <EmotionFlowGraph flowGraph={analysis.flowGraph} />
           </View>
 
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryText}>{analysis.oneLineSummary}</Text>
+          <View style={styles.insightSection}>
+            <Text style={styles.insightLabel}>감정 변화</Text>
+            <Text style={styles.insightText}>{changePointText}</Text>
           </View>
 
-          {analysis.representativeMemo && memoSource ? (
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>대표 메모</Text>
-              {analysis.usedRepresentativeOverride ? (
-                <Text style={styles.overrideHint}>직접 지정한 대표 메모예요</Text>
-              ) : null}
-              <View style={styles.memoHeader}>
-                <EmotionDisplayToken
-                  emotionId={memoSource.emotionId}
-                  showTime={false}
-                  size="sm"
-                  compact
-                />
-                <Text style={styles.memoTime}>{formatEntryTime(memoSource.createdAt)}</Text>
-              </View>
-              {memoParts.title ? <Text style={styles.memoTitle}>{memoParts.title}</Text> : null}
-              {memoParts.content ? (
-                <Text style={styles.memoBody}>{memoParts.content}</Text>
-              ) : memoParts.title ? null : (
-                <Text style={styles.memoBody}>{analysis.representativeMemo.trim()}</Text>
-              )}
-            </View>
-          ) : null}
+          <View style={styles.insightSection}>
+            <Text style={styles.insightLabel}>기록이 몰린 시간</Text>
+            <Text style={styles.insightText}>{concentrationText}</Text>
+          </View>
 
-          {analysis.representativePhotoUri ? (
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>사진</Text>
-              <Image
-                source={{ uri: analysis.representativePhotoUri }}
-                style={styles.photo}
-                resizeMode="cover"
-                accessibilityLabel="대표 사진"
-              />
-            </View>
-          ) : null}
+          <View style={styles.insightSection}>
+            <Text style={styles.insightLabel}>놓친 순간 다시 보기</Text>
+
+            {missedMomentItems.length === 0 ? (
+              <Text style={styles.missedEmpty}>다시 볼 기록이 아직 없어요</Text>
+            ) : (
+              missedMomentItems.map((item) => (
+                <View key={item.id} style={styles.missedItem}>
+                  <Text style={styles.missedTime}>{item.timeText}</Text>
+                  <Text style={styles.missedTitle}>{item.titleText}</Text>
+                </View>
+              ))
+            )}
+          </View>
         </>
       )}
     </ScrollView>
@@ -156,46 +248,6 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     color: notebook.inkMuted,
   },
-  repCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: notebook.gridLine,
-  },
-  repSub: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: notebook.inkLight,
-    marginBottom: 10,
-  },
-  repRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  repDot: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 2,
-  },
-  repTextCol: {
-    flex: 1,
-    minWidth: 0,
-  },
-  repLabel: {
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: -0.2,
-  },
-  repCount: {
-    marginTop: 4,
-    fontSize: 13,
-    fontWeight: '600',
-    color: notebook.inkMuted,
-  },
   card: {
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -211,55 +263,46 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     letterSpacing: -0.1,
   },
-  summaryCard: {
+  insightSection: {
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 20,
+    padding: 18,
     marginBottom: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: notebook.gridLine,
   },
-  summaryText: {
-    fontSize: 18,
-    lineHeight: 28,
+  insightLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: notebook.inkMuted,
+    marginBottom: 10,
+  },
+  insightText: {
+    fontSize: 16,
+    lineHeight: 24,
     fontWeight: '700',
     color: notebook.ink,
-    letterSpacing: -0.2,
   },
-  overrideHint: {
+  missedItem: {
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: notebook.gridLine,
+  },
+  missedTime: {
     fontSize: 12,
     fontWeight: '600',
     color: notebook.inkLight,
-    marginBottom: 10,
+    marginBottom: 4,
   },
-  memoHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 12,
-  },
-  memoTime: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: notebook.inkMuted,
-    fontVariant: ['tabular-nums'],
-  },
-  memoTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: notebook.ink,
-    marginBottom: 8,
-    lineHeight: 24,
-  },
-  memoBody: {
+  missedTitle: {
     fontSize: 15,
-    lineHeight: 24,
+    fontWeight: '700',
     color: notebook.ink,
+    lineHeight: 22,
   },
-  photo: {
-    width: '100%',
-    aspectRatio: 3 / 4,
-    borderRadius: 12,
-    backgroundColor: notebook.gridLine,
+  missedEmpty: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: notebook.inkLight,
   },
 });

@@ -101,6 +101,183 @@ function emotionCounts(day) {
   return counts;
 }
 
+function hasValidMemo(entry) {
+  return typeof entry?.memo === 'string' && entry.memo.trim().length > 0;
+}
+
+/**
+ * Deterministic representative memo selection (source entry) for a day.
+ * Steps:
+ * 0) pre-filter memo entries; if none => null
+ * 1) first emotion change-point entry that has memo
+ * 2) longest same-emotion segment => last memo entry in that segment
+ * 3) dominant emotion => last memo entry (or longest memo if last is too short)
+ * 4) fallback => last memo entry of the day
+ * @param {import('../storage/timelineStateStorage').MoodEntry[]} dayEntries
+ * @returns {import('../storage/timelineStateStorage').MoodEntry | null}
+ */
+function pickRepresentativeMemoEntry(dayEntries) {
+  const sorted = [...(dayEntries || [])].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  const memoEntries = sorted.filter((e) => hasValidMemo(e));
+  if (memoEntries.length === 0) return null;
+
+  // Step 1: change-point memo (current emotion differs from previous).
+  /** @type {import('../storage/timelineStateStorage').MoodEntry[]} */
+  const changeCandidates = [];
+  for (let i = 1; i < sorted.length; i += 1) {
+    const prev = sorted[i - 1];
+    const cur = sorted[i];
+    if (normEmotionId(cur?.emotionId) !== normEmotionId(prev?.emotionId) && hasValidMemo(cur)) {
+      changeCandidates.push(cur);
+    }
+  }
+  if (changeCandidates.length) {
+    // Day-level signals for scoring.
+    /** @type {Record<string, number>} */
+    const dayCounts = {};
+    /** @type {Record<string, number>} */
+    const dayLastAt = {};
+    for (const e of sorted) {
+      const id = normEmotionId(e.emotionId);
+      dayCounts[id] = (dayCounts[id] || 0) + 1;
+      dayLastAt[id] = Date.parse(e.createdAt);
+    }
+    const dayIds = Object.keys(dayCounts);
+    dayIds.sort((a, b) => {
+      if ((dayCounts[b] || 0) !== (dayCounts[a] || 0)) return (dayCounts[b] || 0) - (dayCounts[a] || 0);
+      return (dayLastAt[b] || 0) - (dayLastAt[a] || 0);
+    });
+    const dayDominant = dayIds[0] ? normEmotionId(dayIds[0]) : null;
+
+    const n = sorted.length;
+    const halfIdx = Math.floor(n / 2);
+    const lateHalf = sorted.slice(halfIdx);
+    const lateHalfTotal = lateHalf.length || 1;
+    const lateHalfNeg = lateHalf.reduce((acc, e) => {
+      const id = normEmotionId(e?.emotionId);
+      return acc + (id === 'gloom' || id === 'annoyed' ? 1 : 0);
+    }, 0);
+    const lateHalfIsNegative = lateHalfNeg / lateHalfTotal > 0.5;
+
+    // Candidate scoring: memoLength + laterPositionBonus + dominantMatchBonus + lateNegativeBonus.
+    const scoreCandidate = (e) => {
+      const memoLength = (e.memo || '').trim().length;
+      const idx = sorted.indexOf(e);
+      const posRatio = idx >= 0 && n > 1 ? idx / (n - 1) : 0;
+      const laterPositionBonus = posRatio * 20;
+      const eid = normEmotionId(e.emotionId);
+      const dominantMatchBonus = dayDominant && eid === dayDominant ? 16 : 0;
+      const lateNegativeBonus = lateHalfIsNegative && (eid === 'gloom' || eid === 'annoyed') ? 14 : 0;
+      const laterHalfBonus = idx >= halfIdx ? 10 : 0;
+      return memoLength + laterPositionBonus + dominantMatchBonus + lateNegativeBonus + laterHalfBonus;
+    };
+
+    let best = changeCandidates[0];
+    let bestScore = -Infinity;
+    for (const e of changeCandidates) {
+      const score = scoreCandidate(e);
+      if (
+        score > bestScore ||
+        (score === bestScore && Date.parse(e.createdAt) > Date.parse(best.createdAt))
+      ) {
+        best = e;
+        bestScore = score;
+      }
+    }
+
+    // Additional rule: prefer later-half candidate unless earlier memo is much longer.
+    const laterHalfCandidates = changeCandidates.filter((e) => sorted.indexOf(e) >= halfIdx);
+    if (laterHalfCandidates.length) {
+      let bestLate = laterHalfCandidates[0];
+      let bestLateScore = -Infinity;
+      for (const e of laterHalfCandidates) {
+        const s = scoreCandidate(e);
+        if (s > bestLateScore || (s === bestLateScore && Date.parse(e.createdAt) > Date.parse(bestLate.createdAt))) {
+          bestLate = e;
+          bestLateScore = s;
+        }
+      }
+
+      const bestIdx = sorted.indexOf(best);
+      if (bestIdx >= 0 && bestIdx < halfIdx) {
+        const earlyLen = (best.memo || '').trim().length;
+        const lateLen = (bestLate.memo || '').trim().length;
+        if (!(earlyLen >= lateLen + 30)) {
+          return bestLate;
+        }
+      }
+    }
+
+    return best;
+  }
+
+  // Step 2: longest consecutive same-emotion segment.
+  /** @type {{ start: number, end: number, len: number, emotionId: string } | null} */
+  let bestSeg = null;
+  let segStart = 0;
+  for (let i = 1; i <= sorted.length; i += 1) {
+    const prev = sorted[i - 1];
+    const prevId = prev ? normEmotionId(prev.emotionId) : 'happy';
+    const curId = i < sorted.length ? normEmotionId(sorted[i].emotionId) : null;
+    const boundary = i === sorted.length || curId !== prevId;
+    if (boundary) {
+      const segEnd = i - 1;
+      const len = segEnd - segStart + 1;
+      if (!bestSeg || len > bestSeg.len) {
+        bestSeg = { start: segStart, end: segEnd, len, emotionId: prevId };
+      }
+      segStart = i;
+    }
+  }
+
+  if (bestSeg) {
+    const seg = sorted.slice(bestSeg.start, bestSeg.end + 1);
+    for (let i = seg.length - 1; i >= 0; i -= 1) {
+      if (hasValidMemo(seg[i])) return seg[i];
+    }
+  }
+
+  // Step 3: dominant emotion group.
+  /** @type {Record<string, number>} */
+  const counts = {};
+  /** @type {Record<string, number>} */
+  const lastAt = {};
+  for (const e of sorted) {
+    const id = normEmotionId(e.emotionId);
+    counts[id] = (counts[id] || 0) + 1;
+    lastAt[id] = Date.parse(e.createdAt);
+  }
+  const ids = Object.keys(counts);
+  ids.sort((a, b) => {
+    if ((counts[b] || 0) !== (counts[a] || 0)) return (counts[b] || 0) - (counts[a] || 0);
+    return (lastAt[b] || 0) - (lastAt[a] || 0);
+  });
+  const dominantId = ids[0] ? normEmotionId(ids[0]) : null;
+  if (dominantId) {
+    const domMemo = sorted.filter((e) => normEmotionId(e.emotionId) === dominantId && hasValidMemo(e));
+    if (domMemo.length) {
+      const last = domMemo[domMemo.length - 1];
+      const lastLen = (last.memo || '').length;
+      if (lastLen >= 10) return last;
+
+      let best = last;
+      let bestLen = lastLen;
+      for (const e of domMemo) {
+        const L = (e.memo || '').length;
+        const t = Date.parse(e.createdAt);
+        if (L > bestLen || (L === bestLen && t > Date.parse(best.createdAt))) {
+          best = e;
+          bestLen = L;
+        }
+      }
+      return best;
+    }
+  }
+
+  // Step 4: final fallback => last memo entry in the day.
+  return memoEntries[memoEntries.length - 1];
+}
+
 /**
  * @param {import('../storage/timelineStateStorage').MoodEntry[]} dayEntries
  * @returns {{ kind: 'single' | 'two' | 'multi', points: { emotionId: string, yValue: number, xRatio: number, hour: number, hourLabel: string }[] }}
@@ -138,7 +315,7 @@ export function buildFlowGraphPayload(dayEntries) {
       return (lastAt[b] || 0) - (lastAt[a] || 0);
     });
     const repEmotion = ids[0] ? normEmotionId(ids[0]) : 'happy';
-    return { hour: h, emotionId: repEmotion };
+    return { hour: h, emotionId: repEmotion, count: list.length };
   });
 
   const n = reps.length;
@@ -148,6 +325,7 @@ export function buildFlowGraphPayload(dayEntries) {
     xRatio: n === 1 ? 0.5 : idx / (n - 1),
     hour: r.hour,
     hourLabel: `${String(r.hour).padStart(2, '0')}:00`,
+    count: r.count,
   }));
 
   return { kind: n === 1 ? 'single' : n === 2 ? 'two' : 'multi', points };
@@ -174,28 +352,73 @@ const TRIPLE_LINES = new Map(
 );
 
 function oneLineSummary(first, dominant, last) {
-  if (!first || !dominant || !last) return '감정이 담긴 하루였어요.';
-  const key = `${first}|${dominant}|${last}`;
-  const exact = TRIPLE_LINES.get(key);
-  if (exact) return exact;
-  if (first === dominant && dominant === last) {
-    const m = {
-      annoyed: '한가지 답답함이 길게 이어진 하루',
-      gloom: '마음이 가라앉은 기분이 이어진 하루',
-      flutter: '설렘이 끝까지 이어진 하루',
-      happy: '전반적으로 좋은 기분이 이어진 하루',
-      calm: '잔잔한 리듬이 이어진 하루',
-    }[first];
-    if (m) return m;
-  }
+  // Tone + wording rules:
+  // - One sentence, ends with "하루네요"
+  // - Avoid: "흐름", "패턴", "변화", "무거운"
+  if (!first || !dominant || !last) return '잔잔하게 지나간 하루네요';
+
   const pos = (id) => id === 'happy' || id === 'flutter';
   const neg = (id) => id === 'gloom' || id === 'annoyed';
-  if (pos(first) && neg(dominant) && pos(last)) return '좋게 시작했다가 중간에 흔들렸지만 다시 회복한 하루';
-  if (neg(first) && neg(dominant) && pos(last)) return '힘든 시작이 있었지만 마음이 조금 나아진 하루';
-  if (pos(first) && pos(dominant) && neg(last)) return '밝게 시작했지만 마무리는 조금 무거웠던 하루';
-  if (first === 'calm' && pos(last)) return '차분하게 시작해 기분이 올라간 하루';
-  if (pos(first) && last === 'calm') return '기분이 좋았다가 잔잔하게 가라앉은 하루';
-  return '여러 감정이 오갔던 하루였어요.';
+
+  /** @type {number | null} */
+  const uniqueCount =
+    typeof oneLineSummary.uniqueCount === 'number' ? oneLineSummary.uniqueCount : null;
+  /** @type {number | null} */
+  const switchCount =
+    typeof oneLineSummary.switchCount === 'number' ? oneLineSummary.switchCount : null;
+  /** @type {string | null} */
+  const lateDominant =
+    typeof oneLineSummary.lateDominant === 'string' ? oneLineSummary.lateDominant : null;
+  /** @type {string | null} */
+  const earlyDominant =
+    typeof oneLineSummary.earlyDominant === 'string' ? oneLineSummary.earlyDominant : null;
+  /** @type {number | null} */
+  const repRatio =
+    typeof oneLineSummary.repRatio === 'number' ? oneLineSummary.repRatio : null;
+
+  const uniq = uniqueCount ?? new Set([first, dominant, last].filter(Boolean)).size;
+  const switches = switchCount ?? ((first !== dominant ? 1 : 0) + (dominant !== last ? 1 : 0));
+
+  // 1) High variability / mixed day
+  if (uniq >= 3 || switches >= 2) {
+    return switches >= 3 ? '기분이 자주 바뀐 하루네요' : '여러 감정이 오간 하루네요';
+  }
+
+  // 2) Early vs late difference
+  if (first !== last) {
+    return switches >= 1 ? '뒤로 갈수록 분위기가 달라진 하루네요' : '초반과 후반의 분위기가 달랐던 하루네요';
+  }
+
+  // 3) Later mood stands out (prefer when late half differs from early half)
+  if (lateDominant && (!earlyDominant || lateDominant !== earlyDominant)) {
+    const id = normEmotionId(lateDominant);
+    if (id === 'flutter') return '마지막엔 설렘이 남은 하루네요';
+    if (id === 'happy') return '마지막엔 기분이 풀린 하루네요';
+    if (id === 'gloom') return '뒤로 갈수록 조금 가라앉은 하루네요';
+    if (id === 'annoyed') return '나중에는 짜증이 남은 하루네요';
+  }
+
+  // 4) Single dominant emotion (strict)
+  const dom = normEmotionId(dominant);
+  const ratioOk = repRatio != null ? repRatio >= 0.6 : false;
+  const directionOk =
+    first === last ||
+    (pos(first) && pos(last) && pos(dom)) ||
+    (neg(first) && neg(last) && neg(dom)) ||
+    (first === 'calm' && last === 'calm' && dom === 'calm');
+  if (ratioOk && switches <= 1 && directionOk) {
+    const map = {
+      happy: '기분이 좋은 하루네요',
+      flutter: '설렘이 느껴진 하루네요',
+      calm: '평온한 하루네요',
+      gloom: '조금 가라앉은 하루네요',
+      annoyed: '짜증나는 일이 있었던 하루네요',
+    };
+    if (map[dom]) return map[dom];
+  }
+
+  // 5) Calm / low variation fallback
+  return '잔잔하게 지나간 하루네요';
 }
 
 function dominantEmotionFromPoints(points) {
@@ -253,7 +476,7 @@ export function computeDailyAnalysis(entries, dateKey) {
       };
     }
   } else {
-    const memoEntry = pickBestScoredEntry(day, entryMemoScore);
+    const memoEntry = pickRepresentativeMemoEntry(day);
     if (memoEntry) {
       representativeMemo = memoEntry.memo;
       representativeMemoSource = {
@@ -280,6 +503,26 @@ export function computeDailyAnalysis(entries, dateKey) {
   const firstFlow = pts.length ? normEmotionId(pts[0].emotionId) : null;
   const lastFlow = pts.length ? normEmotionId(pts[pts.length - 1].emotionId) : null;
   const dominantFlow = dominantEmotionFromPoints(pts) || representativeEmotion || firstFlow;
+
+  // Provide oneLineSummary with day-level signals (keeps computeDailyAnalysis return shape stable).
+  const uniqEmotions = new Set(pts.map((p) => normEmotionId(p.emotionId))).size;
+  let switches = 0;
+  for (let i = 1; i < pts.length; i += 1) {
+    if (normEmotionId(pts[i].emotionId) !== normEmotionId(pts[i - 1].emotionId)) switches += 1;
+  }
+  const halfIdx = Math.floor(pts.length / 2);
+  const earlyPts = pts.slice(0, Math.max(1, halfIdx));
+  const latePts = pts.slice(Math.max(0, halfIdx));
+  const earlyDominant = dominantEmotionFromPoints(earlyPts);
+  const lateDominant = dominantEmotionFromPoints(latePts);
+  const repRatio = totalEntryCount > 0 ? representativeEmotionCount / totalEntryCount : 0;
+
+  oneLineSummary.uniqueCount = uniqEmotions;
+  oneLineSummary.switchCount = switches;
+  oneLineSummary.earlyDominant = earlyDominant;
+  oneLineSummary.lateDominant = lateDominant;
+  oneLineSummary.repRatio = repRatio;
+
   const summary = oneLineSummary(firstFlow, dominantFlow, lastFlow);
 
   return {
