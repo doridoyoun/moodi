@@ -1,14 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import EmotionFlowGraph from '../components/analysis/EmotionFlowGraph';
 import { useMood } from '../src/context/MoodContext';
 import { notebook } from '../constants/theme';
-import { computeDailyAnalysis, emotionYValue, normEmotionId } from '../utils/dailyAnalysis';
+import { computeDailyAnalysis, normEmotionId } from '../utils/dailyAnalysis';
 import { formatDateKeyForDisplay, getEntriesForDate, getEntryTimelineHour } from '../storage/timelineStateStorage';
 import { formatEntryTime, paletteFor, splitMemo } from '../utils/timelineEntryFormat';
-
-const MAX_SEGMENT_SIZE = 6;
 
 function normalizeImageUri(value) {
   const s = typeof value === 'string' ? value.trim() : '';
@@ -18,38 +15,35 @@ function normalizeImageUri(value) {
   return null;
 }
 
+function emotionRhythmOffset(emotionId) {
+  switch (emotionId) {
+    case 'happy':
+      return 0;
+    case 'flutter':
+      return 20;
+    case 'calm':
+      return 40;
+    case 'gloom':
+      return 60;
+    case 'annoyed':
+      return 80;
+    default:
+      return 40;
+  }
+}
+
 export default function DailyAnalysisScreen() {
   const insets = useSafeAreaInsets();
-  const { entries, selectedDate, setRepresentativeOverrideForDate } = useMood();
-  const [selectedSegmentIndex, setSelectedSegmentIndex] = useState(null);
+  const { entries, selectedDate } = useMood();
   const [previewUri, setPreviewUri] = useState(null);
-  const [oneLinePickerVisible, setOneLinePickerVisible] = useState(false);
   const [readOnlyEntryId, setReadOnlyEntryId] = useState(null);
   const [selectedEntryId, setSelectedEntryId] = useState(null);
+  const [showEmotionOnlyRecords, setShowEmotionOnlyRecords] = useState(false);
 
   const analysis = useMemo(
     () => computeDailyAnalysis(entries, selectedDate),
     [entries, selectedDate],
   );
-
-  const oneLineMemo =
-    analysis?.representativeMemo && typeof analysis.representativeMemo === 'string'
-      ? analysis.representativeMemo.trim()
-      : '';
-  const oneLineSource = analysis?.representativeMemoSource ?? null;
-  const oneLineTimeText =
-    oneLineSource?.createdAt && typeof oneLineSource.createdAt === 'string'
-      ? formatEntryTime(oneLineSource.createdAt)
-      : '';
-
-  const oneLineTitle = useMemo(() => {
-    if (!oneLineMemo) return '';
-    const parts = splitMemo(oneLineMemo);
-    const title = (parts.title || '').trim();
-    const body = (parts.content || '').trim() || oneLineMemo;
-    const firstLine = body.split('\n').map((x) => x.trim()).find(Boolean) || '';
-    return title || firstLine;
-  }, [oneLineMemo]);
 
   const dateTitle = useMemo(
     () => formatDateKeyForDisplay(selectedDate, 'ko-KR'),
@@ -68,9 +62,10 @@ export default function DailyAnalysisScreen() {
 
   useEffect(() => {
     setSelectedEntryId(null);
+    setShowEmotionOnlyRecords(false);
   }, [selectedDate]);
 
-  const emotionBarEntries = useMemo(() => {
+  const emotionFlowTimelineItems = useMemo(() => {
     return daySorted.map((e) => {
       const memoRaw = typeof e?.memo === 'string' ? e.memo.trim() : '';
       const parts = splitMemo(memoRaw);
@@ -78,142 +73,29 @@ export default function DailyAnalysisScreen() {
       const content = (parts.content || '').trim();
       const firstLine = content.split('\n').map((x) => x.trim()).find(Boolean) || '';
       const hasMemo = Boolean(title || firstLine);
-      const pal = paletteFor(normEmotionId(e?.emotionId));
+      const titleText = title || firstLine || '';
+      const emotionId = normEmotionId(e?.emotionId);
+      const pal = paletteFor(emotionId);
+      const imageUri = normalizeImageUri(e?.imageUri);
       return {
         id: e?.id ?? `${e?.createdAt || ''}-${e?.emotionId || ''}`,
         entryId: e?.id ?? null,
         timeText: formatEntryTime(e?.createdAt),
+        emotionId,
         hasMemo,
+        titleText,
         color: pal.border,
+        imageUri,
+        hasPhoto: Boolean(imageUri),
       };
     });
   }, [daySorted]);
 
-  const oneLineCandidates = useMemo(() => {
-    return daySorted
-      .map((e) => {
-        const memoRaw = typeof e?.memo === 'string' ? e.memo.trim() : '';
-        const parts = splitMemo(memoRaw);
-        const title = (parts.title || '').trim();
-        const content = (parts.content || '').trim();
-        const firstLine = content.split('\n').map((x) => x.trim()).find(Boolean) || '';
-
-        if (!title && !firstLine) return null;
-
-        return {
-          id: e?.id ?? `${e?.createdAt || ''}-${e?.emotionId || ''}`,
-          entryId: e?.id ?? null,
-          timeText: formatEntryTime(e?.createdAt),
-          preview: title || firstLine,
-        };
-      })
-      .filter(Boolean);
-  }, [daySorted]);
-
-  useEffect(() => {
-    setSelectedSegmentIndex(null);
-  }, [selectedDate]);
-
-  const emotionSegments = useMemo(() => {
-    if (!daySorted.length) return [];
-    /** @type {{ emotionId: string, count: number, startCreatedAt: string, entries: any[] }[]} */
-    const segs = [];
-    /** @type {{ emotionId: string, entries: any[] } | null} */
-    let run = null;
-
-    const flushRunIntoChunks = () => {
-      if (!run || run.entries.length === 0) return;
-      const list = run.entries;
-      for (let i = 0; i < list.length; i += MAX_SEGMENT_SIZE) {
-        const chunk = list.slice(i, i + MAX_SEGMENT_SIZE);
-        if (!chunk.length) continue;
-        segs.push({
-          emotionId: run.emotionId,
-          count: chunk.length,
-          startCreatedAt: chunk[0].createdAt,
-          entries: chunk,
-        });
-      }
-    };
-
-    for (const e of daySorted) {
-      const eid = normEmotionId(e?.emotionId);
-      if (!run || run.emotionId !== eid) {
-        flushRunIntoChunks();
-        run = { emotionId: eid, entries: [e] };
-      } else {
-        run.entries.push(e);
-      }
-    }
-    flushRunIntoChunks();
-
-    return segs;
-  }, [daySorted]);
-
-  const segmentFlowGraph = useMemo(() => {
-    const n = emotionSegments.length;
-    if (n === 0) return { kind: 'single', points: [] };
-
-    const times = emotionSegments
-      .map((s) => Date.parse(s.startCreatedAt))
-      .filter((t) => Number.isFinite(t));
-    const minT = times.length ? Math.min(...times) : NaN;
-    const maxT = times.length ? Math.max(...times) : NaN;
-    const span = Number.isFinite(minT) && Number.isFinite(maxT) ? maxT - minT : 0;
-
-    const points = emotionSegments.map((seg, idx) => {
-      const t = Date.parse(seg.startCreatedAt);
-      const xRatio =
-        n === 1
-          ? 0.5
-          : Number.isFinite(t) && span > 0
-            ? Math.min(1, Math.max(0, (t - minT) / span))
-            : idx / (n - 1);
-      const count = seg.count;
-      const r = count <= 1 ? 5 : count <= 3 ? 7 : 9;
-      return {
-        emotionId: seg.emotionId,
-        yValue: emotionYValue(seg.emotionId),
-        xRatio,
-        r,
-        label: formatEntryTime(seg.startCreatedAt),
-      };
-    });
-    return { kind: n === 1 ? 'single' : n === 2 ? 'two' : 'multi', points };
-  }, [emotionSegments]);
-
-  const selectedSegment = useMemo(() => {
-    if (selectedSegmentIndex == null) return null;
-    const idx = Number(selectedSegmentIndex);
-    if (!Number.isFinite(idx) || idx < 0 || idx >= emotionSegments.length) return null;
-    return emotionSegments[idx] ?? null;
-  }, [emotionSegments, selectedSegmentIndex]);
-
-  const selectedMemoItems = useMemo(() => {
-    if (!selectedSegment) return [];
-    const list = selectedSegment.entries || [];
-    return list
-      .filter((e) => (e?.memo || '').trim().length > 0)
-      .map((e) => {
-        const parts = splitMemo(e.memo || '');
-        const title = (parts.title || '').trim();
-        const body = (parts.content || '').trim() || (e.memo || '').trim();
-        const firstLine = body.split('\n').map((x) => x.trim()).find(Boolean) || '';
-        const titleText =
-          title ||
-          (firstLine.length > 36 ? `${firstLine.slice(0, 36).trim()}…` : firstLine) ||
-          '메모';
-        const imageUri = normalizeImageUri(e?.imageUri);
-        const hasPhoto = Boolean(imageUri);
-        return {
-          id: e.id,
-          timeText: formatEntryTime(e.createdAt),
-          titleText,
-          hasPhoto,
-          imageUri,
-        };
-      });
-  }, [selectedSegment]);
+  const selectedFlowEntry = useMemo(
+    () =>
+      emotionFlowTimelineItems.find((x) => x.entryId != null && x.entryId === selectedEntryId) ?? null,
+    [emotionFlowTimelineItems, selectedEntryId],
+  );
 
   const dayListItems = useMemo(() => {
     const rep = analysis?.representativeMemoSource ?? null;
@@ -253,10 +135,7 @@ export default function DailyAnalysisScreen() {
   }, [analysis, daySorted]);
 
   const dayListMemoItems = useMemo(() => dayListItems.filter((x) => x.hasMemo), [dayListItems]);
-  const dayListEmotionOnlyCount = useMemo(
-    () => dayListItems.reduce((sum, x) => sum + (x.hasMemo ? 0 : 1), 0),
-    [dayListItems],
-  );
+  const dayListEmotionOnlyItems = useMemo(() => dayListItems.filter((x) => !x.hasMemo), [dayListItems]);
 
   const readOnlyEntry = useMemo(() => {
     if (!readOnlyEntryId) return null;
@@ -294,59 +173,6 @@ export default function DailyAnalysisScreen() {
     return '감정이 여러 번 바뀐 하루예요';
   }, [daySorted]);
 
-  const concentrationText = useMemo(() => {
-    if (daySorted.length === 0) return '기록이 아직 없어요';
-    if (daySorted.length === 1) {
-      const h = getEntryTimelineHour(daySorted[0]);
-      if (h >= 6 && h <= 11) return '아침에 기록이 있었어요';
-      if (h >= 12 && h <= 17) return '오후에 기록이 있었어요';
-      if (h >= 18 && h <= 23) return '저녁에 기록이 있었어요';
-      return '하루 중 한 번 기록이 있었어요';
-    }
-
-    /** @type {Record<number, number>} */
-    const byHour = {};
-    for (const e of daySorted) {
-      const h = getEntryTimelineHour(e);
-      if (!Number.isFinite(h)) continue;
-      byHour[h] = (byHour[h] || 0) + 1;
-    }
-
-    // Densest 3-hour window (simple + stable).
-    const windowSize = 3;
-    let bestStart = 0;
-    let bestCount = -1;
-    for (let start = 0; start <= 24 - windowSize; start += 1) {
-      let c = 0;
-      for (let h = start; h < start + windowSize; h += 1) c += byHour[h] || 0;
-      if (c > bestCount) {
-        bestCount = c;
-        bestStart = start;
-      }
-    }
-
-    if (bestCount >= 3) {
-      const end = bestStart + windowSize - 1;
-      return `${bestStart}시~${end}시에 기록이 집중되어 있어요`;
-    }
-
-    // Fallback broad label (morning / afternoon / evening) using bucket counts.
-    const countIn = (from, to) => {
-      let c = 0;
-      for (let h = from; h <= to; h += 1) c += byHour[h] || 0;
-      return c;
-    };
-    const morning = countIn(6, 11);
-    const afternoon = countIn(12, 17);
-    const evening = countIn(18, 23);
-
-    const max = Math.max(morning, afternoon, evening);
-    if (max <= 1) return '하루 중 띄엄띄엄 기록됐어요';
-    if (evening === max) return '저녁에 기록이 많았어요';
-    if (afternoon === max) return '오후에 기록이 많았어요';
-    return '아침에 기록이 많았어요';
-  }, [daySorted]);
-
   return (
     <ScrollView
       style={styles.scroll}
@@ -365,121 +191,103 @@ export default function DailyAnalysisScreen() {
         <>
           <View style={styles.card}>
             <Text style={styles.cardTitle}>감정 흐름</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.barRow}
-            >
-              {emotionBarEntries.map((b) => {
-                const isSelected = Boolean(b.entryId) && b.entryId === selectedEntryId;
-                const opacity = selectedEntryId ? (isSelected ? 1 : 0.5) : 1;
-                const w = b.hasMemo ? 10 : 6;
-                const h = isSelected ? 56 : 46;
-                return (
-                  <Pressable
-                    key={b.id}
-                    onPress={() => {
-                      if (b.entryId) setSelectedEntryId(b.entryId);
-                    }}
-                    hitSlop={10}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${b.timeText} 감정 선택`}
-                    style={({ pressed }) => [styles.barItem, pressed && { opacity: 0.85 }]}
-                  >
-                    {isSelected ? <Text style={styles.barTimeLabel}>{b.timeText}</Text> : null}
-                    <View
-                      style={[
-                        styles.bar,
-                        {
-                          width: w,
-                          height: h,
-                          backgroundColor: b.color,
-                          opacity,
-                        },
-                        isSelected && styles.barSelected,
-                      ]}
-                    />
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-            <EmotionFlowGraph
-              flowGraph={segmentFlowGraph}
-              selectedIndex={selectedSegmentIndex}
-              onSelectIndex={(idx) => {
-                setSelectedSegmentIndex((cur) => (cur === idx ? null : idx));
-              }}
-            />
+            <View style={styles.flowRhythmBox}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.flowRhythmContent}
+              >
+                {emotionFlowTimelineItems.map((item) => {
+                  const isSelected = Boolean(item.entryId) && item.entryId === selectedEntryId;
+                  const barOpacity = selectedEntryId ? (isSelected ? 1 : 0.45) : 1;
+                  const barW = item.hasMemo ? 12 : 8;
+                  const barH = 36;
+                  const top = emotionRhythmOffset(item.emotionId);
+                  return (
+                    <Pressable
+                      key={item.id}
+                      onPress={() => {
+                        if (!item.entryId) return;
+                        setSelectedEntryId((cur) => (cur === item.entryId ? null : item.entryId));
+                      }}
+                      hitSlop={10}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isSelected }}
+                      accessibilityLabel="감정 순간"
+                      style={({ pressed }) => [styles.flowRhythmItem, pressed && { opacity: 0.92 }]}
+                    >
+                      <View style={[styles.flowRhythmBarWrap, { marginTop: top }]}>
+                        <View
+                          style={[
+                            styles.flowRhythmBar,
+                            {
+                              width: barW,
+                              height: barH,
+                              backgroundColor: item.color,
+                              opacity: barOpacity,
+                            },
+                            isSelected ? styles.flowRhythmBarSelected : null,
+                          ]}
+                        />
+                      </View>
+                      {item.hasMemo ? <Text style={styles.flowRhythmMemoLabel}>메모</Text> : null}
+                      {isSelected ? (
+                        <Text style={styles.flowRhythmSelectedTime}>{item.timeText}</Text>
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
           </View>
 
-          <Pressable
-            onPress={() => setOneLinePickerVisible(true)}
-            style={({ pressed }) => [styles.oneLineSection, pressed && { opacity: 0.92 }]}
-            accessibilityRole="button"
-            accessibilityLabel="오늘의 한 줄 선택"
-          >
-            <View style={styles.oneLineHeaderRow}>
-              <Text style={styles.insightLabel}>오늘의 한 줄</Text>
-              {oneLineTimeText ? <Text style={styles.oneLineTime}>{oneLineTimeText}</Text> : null}
-            </View>
-            <Text style={styles.oneLineText}>
-              {oneLineTitle || '오늘의 한 줄을 선택해보세요'}
-            </Text>
-          </Pressable>
+          <View style={styles.segmentDetailSection}>
+            <Text style={styles.insightLabel}>이때 남긴 기록</Text>
+
+            {!selectedFlowEntry ? (
+              <Text style={styles.segmentDetailHint}>
+                감정 흐름에서 순간을 눌러 그때의 기록을 볼 수 있어요
+              </Text>
+            ) : !selectedFlowEntry.hasMemo ? (
+              <Text style={styles.segmentDetailHint}>이 순간에는 남긴 메모가 없어요</Text>
+            ) : (
+              <View style={[styles.segmentMemoItem, { borderTopWidth: 0, paddingTop: 0 }]}>
+                <Text style={styles.segmentMemoTime}>{selectedFlowEntry.timeText}</Text>
+                <View style={styles.segmentMemoTitleRow}>
+                  <Text style={styles.segmentMemoTitle} numberOfLines={4}>
+                    {selectedFlowEntry.titleText}
+                  </Text>
+                  {selectedFlowEntry.hasPhoto ? (
+                    <Pressable
+                      onPress={() => {
+                        if (selectedFlowEntry.imageUri) setPreviewUri(selectedFlowEntry.imageUri);
+                      }}
+                      hitSlop={10}
+                      accessibilityRole="button"
+                      accessibilityLabel="사진 미리보기"
+                      style={({ pressed }) => [pressed && { opacity: 0.7 }]}
+                    >
+                      <Text style={styles.photoIndicator}>📷</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </View>
+            )}
+          </View>
 
           <View style={styles.insightSection}>
             <Text style={styles.insightLabel}>감정 변화</Text>
             <Text style={styles.insightText}>{changePointText}</Text>
           </View>
 
-          <View style={styles.insightSection}>
-            <Text style={styles.insightLabel}>기록이 몰린 시간</Text>
-            <Text style={styles.insightText}>{concentrationText}</Text>
-          </View>
-
-          <View style={styles.segmentDetailSection}>
-            <Text style={styles.insightLabel}>이때 남긴 기록</Text>
-
-            {!selectedSegment ? (
-              <Text style={styles.segmentDetailHint}>
-                그래프의 점을 눌러 그때의 기록을 볼 수 있어요
-              </Text>
-            ) : selectedMemoItems.length === 0 ? (
-              <Text style={styles.segmentDetailHint}>이 구간에는 남긴 메모가 없어요</Text>
-            ) : (
-              selectedMemoItems.map((item, idx) => (
-                <View
-                  key={item.id}
-                  style={[styles.segmentMemoItem, idx === 0 ? { borderTopWidth: 0 } : null]}
-                >
-                  <Text style={styles.segmentMemoTime}>{item.timeText}</Text>
-                  <View style={styles.segmentMemoTitleRow}>
-                    <Text style={styles.segmentMemoTitle}>{item.titleText}</Text>
-                    {item.hasPhoto ? (
-                      <Pressable
-                        onPress={() => {
-                          if (item.imageUri) setPreviewUri(item.imageUri);
-                        }}
-                        hitSlop={10}
-                        accessibilityRole="button"
-                        accessibilityLabel="사진 미리보기"
-                        style={({ pressed }) => [pressed && { opacity: 0.7 }]}
-                      >
-                        <Text style={styles.photoIndicator}>📷</Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
-                </View>
-              ))
-            )}
-          </View>
-
           <View style={styles.dayListSection}>
             <Text style={styles.sectionTitle}>오늘 기록</Text>
 
             {dayListMemoItems.map((item, idx) => {
-              const isLast =
-                idx === dayListMemoItems.length - 1 && dayListEmotionOnlyCount === 0;
+              const emotionPal = paletteFor(item.emotionId);
+              const hasEmotionBlockBelow = dayListEmotionOnlyItems.length > 0;
+              const isLastMemoOnly =
+                idx === dayListMemoItems.length - 1 && !hasEmotionBlockBelow;
               return (
                 <Pressable
                   key={item.id}
@@ -488,33 +296,88 @@ export default function DailyAnalysisScreen() {
                   }}
                   style={({ pressed }) => [
                     styles.dayListItem,
-                    isLast ? { marginBottom: 0 } : null,
+                    isLastMemoOnly ? { marginBottom: 0 } : null,
                     pressed && { opacity: 0.92 },
                   ]}
                   accessibilityRole="button"
                   accessibilityLabel={`${item.timeText} 메모 열기`}
                 >
                   <Text style={styles.dayListTime}>{item.timeText}</Text>
-
-                  <Text
-                    style={[
-                      styles.dayListText,
-                      item.isRepresentative ? styles.dayListTextRep : null,
-                    ]}
-                  >
-                    {item.memoPreview}
-                  </Text>
+                  <View style={styles.dayListContent}>
+                    <View style={[styles.emotionDot, { backgroundColor: emotionPal.border }]} />
+                    <View style={styles.dayListTextRow}>
+                      <Text
+                        style={[
+                          styles.dayListText,
+                          item.isRepresentative ? styles.dayListTextRep : null,
+                        ]}
+                        numberOfLines={3}
+                      >
+                        {item.memoPreview}
+                      </Text>
+                      {item.hasPhoto ? (
+                        <Pressable
+                          onPress={() => {
+                            if (item.imageUri) setPreviewUri(item.imageUri);
+                          }}
+                          hitSlop={10}
+                          accessibilityRole="button"
+                          accessibilityLabel="사진 미리보기"
+                          style={({ pressed }) => [pressed && { opacity: 0.7 }]}
+                        >
+                          <Text style={styles.photoIndicator}>📷</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  </View>
                 </Pressable>
               );
             })}
 
-            {dayListEmotionOnlyCount > 0 ? (
-              <View style={[styles.dayListItem, { marginBottom: 0 }]}>
-                <Text style={styles.dayListTime} />
-                <Text style={styles.dayListEmotionOnlyText}>
-                  감정만 기록된 순간 {dayListEmotionOnlyCount}개
-                </Text>
-              </View>
+            {dayListEmotionOnlyItems.length > 0 ? (
+              <>
+                <Pressable
+                  onPress={() => setShowEmotionOnlyRecords((v) => !v)}
+                  style={({ pressed }) => [
+                    styles.dayListEmotionOnlySummaryPressable,
+                    showEmotionOnlyRecords ? { marginBottom: 8 } : { marginBottom: 0 },
+                    pressed && { opacity: 0.88 },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: showEmotionOnlyRecords }}
+                  accessibilityLabel={`감정만 기록된 순간 ${dayListEmotionOnlyItems.length}개`}
+                >
+                  <View style={styles.dayListEmotionOnlyGridRow}>
+                    <View style={styles.dayListEmotionOnlyTimeSpacer} />
+                    <View style={styles.dayListEmotionOnlyDotSpacer} />
+                    <View style={styles.dayListEmotionOnlyTextCol}>
+                      <Text style={styles.dayListEmotionOnlySummaryText}>
+                        감정만 기록된 순간 {dayListEmotionOnlyItems.length}개
+                      </Text>
+                    </View>
+                  </View>
+                </Pressable>
+                {showEmotionOnlyRecords
+                  ? dayListEmotionOnlyItems.map((item, idx) => {
+                      const pal = paletteFor(item.emotionId);
+                      const isLastEmotionRow = idx === dayListEmotionOnlyItems.length - 1;
+                      return (
+                        <View
+                          key={item.id}
+                          style={[styles.dayListEmotionOnlyRow, isLastEmotionRow ? { marginBottom: 0 } : null]}
+                        >
+                          <View style={styles.dayListEmotionOnlyGridRow}>
+                            <Text style={styles.dayListEmotionOnlyTime}>{item.timeText}</Text>
+                            <View style={styles.dayListEmotionOnlyDotSpacer} />
+                            <View style={styles.dayListEmotionOnlyTextCol}>
+                              <Text style={styles.dayListEmotionOnlyLabel}>{pal.label}</Text>
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })
+                  : null}
+              </>
             ) : null}
           </View>
         </>
@@ -549,50 +412,6 @@ export default function DailyAnalysisScreen() {
                 />
               ) : null}
             </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={oneLinePickerVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setOneLinePickerVisible(false)}
-      >
-        <View style={styles.oneLineModalRoot}>
-          <Pressable
-            style={styles.oneLineModalBackdrop}
-            onPress={() => setOneLinePickerVisible(false)}
-            accessibilityRole="button"
-            accessibilityLabel="닫기"
-          />
-          <View style={styles.oneLineModalCard}>
-            <Text style={styles.oneLineModalTitle}>오늘의 한 줄</Text>
-            <Text style={styles.oneLineModalSub}>오늘 기록 중 하나를 선택하세요</Text>
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 10 }}>
-              {oneLineCandidates.length === 0 ? (
-                <Text style={styles.oneLineModalEmpty}>선택할 메모가 아직 없어요</Text>
-              ) : (
-                oneLineCandidates.map((item) => (
-                  <Pressable
-                    key={item.id}
-                    onPress={() => {
-                      if (!item.entryId) return;
-                      setRepresentativeOverrideForDate(selectedDate, item.entryId);
-                      setOneLinePickerVisible(false);
-                    }}
-                    style={({ pressed }) => [styles.oneLineItem, pressed && { opacity: 0.88 }]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${item.timeText} 선택`}
-                  >
-                    <Text style={styles.oneLineItemTime}>{item.timeText}</Text>
-                    <Text style={styles.oneLineItemText} numberOfLines={2}>
-                      {item.preview}
-                    </Text>
-                  </Pressable>
-                ))
-              )}
-            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -700,34 +519,49 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: notebook.gridLine,
   },
-  barRow: {
-    paddingTop: 10,
-    paddingBottom: 14,
-    alignItems: 'flex-end',
-    gap: 10,
+  flowRhythmBox: {
+    marginTop: 4,
+    height: 152,
   },
-  barItem: {
+  flowRhythmContent: {
+    alignItems: 'flex-start',
+    paddingRight: 6,
+    paddingBottom: 20,
+  },
+  flowRhythmItem: {
+    height: 152,
+    width: 12,
+    position: 'relative',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingTop: 16,
+    justifyContent: 'flex-start',
+    marginRight: 2,
   },
-  bar: {
+  flowRhythmBarWrap: {
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+  },
+  flowRhythmBar: {
     borderRadius: 999,
   },
-  barSelected: {
-    transform: [{ scaleX: 1.06 }],
+  flowRhythmBarSelected: {
     borderWidth: 2,
-    borderColor: 'rgba(15, 23, 42, 0.18)',
+    borderColor: 'rgba(79, 70, 229, 0.5)',
   },
-  barTimeLabel: {
+  flowRhythmMemoLabel: {
     position: 'absolute',
-    top: 0,
-    left: -12,
-    right: -12,
-    textAlign: 'center',
+    bottom: 16,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '700',
     color: notebook.inkMuted,
+    textAlign: 'center',
+  },
+  flowRhythmSelectedTime: {
+    position: 'absolute',
+    bottom: 0,
+    fontSize: 11,
+    fontWeight: '700',
+    color: notebook.inkMuted,
+    textAlign: 'center',
     fontVariant: ['tabular-nums'],
   },
   cardTitle: {
@@ -863,109 +697,56 @@ const styles = StyleSheet.create({
     color: notebook.ink,
   },
   dayListTextRep: {
-    fontWeight: '700',
-    color: '#111827',
+    fontWeight: '800',
+    color: '#0f172a',
   },
   photoIndicator: {
     fontSize: 12,
     color: notebook.inkLight,
     paddingTop: 1,
   },
-  dayListEmotionOnlyText: {
-    flex: 1,
+  dayListEmotionOnlySummaryPressable: {
+    alignItems: 'stretch',
+    paddingVertical: 6,
+  },
+  dayListEmotionOnlySummaryText: {
     fontSize: 14,
     lineHeight: 22,
     fontWeight: '600',
     color: notebook.inkMuted,
+    textAlign: 'left',
   },
-  oneLineSection: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: notebook.gridLine,
+  dayListEmotionOnlyRow: {
+    marginBottom: 6,
+    paddingVertical: 2,
   },
-  oneLineHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-    gap: 10,
-  },
-  oneLineTime: {
-    fontSize: 12,
-    color: notebook.inkLight,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-  oneLineText: {
-    fontSize: 16,
-    lineHeight: 24,
-    fontWeight: '700',
-    color: notebook.ink,
-  },
-  oneLineModalRoot: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-  },
-  oneLineModalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  oneLineModalCard: {
-    backgroundColor: '#fff',
-    borderRadius: 18,
-    paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 14,
-    maxHeight: '78%',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: notebook.gridLine,
-  },
-  oneLineModalTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: notebook.ink,
-    textAlign: 'center',
-  },
-  oneLineModalSub: {
-    marginTop: 6,
-    marginBottom: 12,
-    fontSize: 12,
-    fontWeight: '600',
-    color: notebook.inkMuted,
-    textAlign: 'center',
-  },
-  oneLineModalEmpty: {
-    textAlign: 'center',
-    color: notebook.inkLight,
-    paddingVertical: 18,
-    fontWeight: '600',
-  },
-  oneLineItem: {
+  dayListEmotionOnlyGridRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 12,
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: notebook.gridLine,
   },
-  oneLineItemTime: {
+  dayListEmotionOnlyTimeSpacer: {
     width: 48,
-    fontSize: 12,
-    color: notebook.inkLight,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
   },
-  oneLineItemText: {
+  dayListEmotionOnlyDotSpacer: {
+    width: 8,
+    marginRight: 8,
+  },
+  dayListEmotionOnlyTextCol: {
     flex: 1,
     minWidth: 0,
-    fontSize: 14,
-    lineHeight: 20,
-    color: notebook.ink,
+  },
+  dayListEmotionOnlyTime: {
+    width: 48,
+    fontSize: 11,
+    fontWeight: '500',
+    color: notebook.inkLight,
+    fontVariant: ['tabular-nums'],
+  },
+  dayListEmotionOnlyLabel: {
+    fontSize: 13,
     fontWeight: '600',
+    color: notebook.inkMuted,
+    textAlign: 'left',
   },
   previewRoot: {
     flex: 1,
