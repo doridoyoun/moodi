@@ -19,14 +19,21 @@ import { formatEntryTime, splitMemo } from '../utils/timelineEntryFormat';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
+const VALID_EMOTION_IDS = new Set(moodOrder);
+
+/** Y-level for fluctuation (direction reversals); matches dailyAnalysis emotionYValue ordering. */
+const EMOTION_LEVEL = {
+  happy: 5,
+  flutter: 4,
+  calm: 3,
+  gloom: 2,
+  annoyed: 1,
+};
+
 function normalizeImageUri(value) {
   const s = typeof value === 'string' ? value.trim() : '';
   if (!s) return null;
-  // Accept common RN/Expo URI schemes.
-  if (/^(https?:|file:|content:|ph:|assets-library:|blob:|data:)/i.test(s)) return s;
-  // Also allow bare absolute paths on some platforms.
-  if (/^[a-zA-Z]:\\/.test(s)) return s;
-  return null;
+  return s;
 }
 
 function buildMonthGrid(year, monthIndex) {
@@ -50,12 +57,6 @@ function dateKeyForDay(year, monthIndex, day) {
   const m = String(monthIndex + 1).padStart(2, '0');
   const dd = String(day).padStart(2, '0');
   return `${year}-${m}-${dd}`;
-}
-
-function formatShortMd(dateKey) {
-  const p = parseDateKey(dateKey);
-  if (!p) return '';
-  return `${p.monthIndex + 1}/${String(p.day).padStart(2, '0')}`;
 }
 
 export default function CalendarScreen() {
@@ -101,12 +102,122 @@ export default function CalendarScreen() {
     [selectedDayEmotionCounts],
   );
 
+  const dayEntries = useMemo(() => getEntriesForDate(entries, selectedDate), [entries, selectedDate]);
+  const daySorted = useMemo(
+    () => [...dayEntries].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)),
+    [dayEntries],
+  );
+
   const analysis = computeDailyAnalysis(entries, selectedDate);
 
   const summaryText = useMemo(() => {
-    const s = typeof analysis?.oneLineSummary === 'string' ? analysis.oneLineSummary.trim() : '';
-    return s || '아직 이 날의 요약이 없어요';
-  }, [analysis]);
+    if (selectedDayEmotionTotal === 0) return '아직 이 날의 기록이 없어요';
+
+    const seq = daySorted
+      .map((e) => (typeof e?.emotionId === 'string' ? e.emotionId.trim() : ''))
+      .filter((id) => VALID_EMOTION_IDS.has(id));
+
+    if (seq.length === 0) return '아직 이 날의 기록이 없어요';
+
+    const uniqueCount = new Set(seq).size;
+
+    const rawLevels = seq.map((id) => EMOTION_LEVEL[id]).filter((l) => typeof l === 'number');
+    const collapsedLevels = [];
+    for (const l of rawLevels) {
+      if (collapsedLevels.length === 0 || collapsedLevels[collapsedLevels.length - 1] !== l) {
+        collapsedLevels.push(l);
+      }
+    }
+
+    let directionReversals = 0;
+    /** @type {'up' | 'down' | null} */
+    let prevDir = null;
+    for (let i = 1; i < collapsedLevels.length; i += 1) {
+      const delta = collapsedLevels[i] - collapsedLevels[i - 1];
+      if (delta === 0) continue;
+      const dir = delta > 0 ? 'up' : 'down';
+      if (prevDir != null && dir !== prevDir) directionReversals += 1;
+      prevDir = dir;
+    }
+
+    const firstEmotion = seq[0];
+
+    /** @type {Record<string, number>} */
+    const counts = {};
+    for (const id of seq) {
+      counts[id] = (counts[id] || 0) + 1;
+    }
+    const total = seq.length;
+
+    let topEmotion = null;
+    let topCount = -1;
+    for (const id of moodOrder) {
+      const n = counts[id] ?? 0;
+      if (n > topCount) {
+        topCount = n;
+        topEmotion = id;
+      }
+    }
+    const topRatio = total > 0 && topEmotion != null ? (counts[topEmotion] ?? 0) / total : 0;
+
+    const halfIdx = Math.floor(seq.length / 2);
+    const lateSeq = seq.slice(halfIdx);
+    const lateTotal = lateSeq.length || 1;
+    /** @type {Record<string, number>} */
+    const lateCounts = {};
+    for (const id of lateSeq) {
+      lateCounts[id] = (lateCounts[id] || 0) + 1;
+    }
+    let lateDominantEmotion = null;
+    let lateDomCount = -1;
+    for (const id of moodOrder) {
+      const n = lateCounts[id] ?? 0;
+      if (n > lateDomCount) {
+        lateDomCount = n;
+        lateDominantEmotion = id;
+      }
+    }
+    const lateDominantRatio =
+      lateDominantEmotion != null ? (lateCounts[lateDominantEmotion] ?? 0) / lateTotal : 0;
+
+    const label = (id) => (id && moodPalette[id] ? moodPalette[id].label : '감정');
+
+    if (uniqueCount === 1) {
+      return `${label(firstEmotion)}이 이어진 하루예요`;
+    }
+
+    if (
+      daySorted.length >= 4 &&
+      lateDominantEmotion &&
+      firstEmotion !== lateDominantEmotion &&
+      lateDominantRatio >= 0.6
+    ) {
+      switch (lateDominantEmotion) {
+        case 'happy':
+          return '뒤로 갈수록 기분이 풀린 하루였어요';
+        case 'flutter':
+          return '뒤로 갈수록 설렘이 남은 하루였어요';
+        case 'calm':
+          return '중간부터 감정이 안정된 하루였어요';
+        case 'gloom':
+          return '뒤로 갈수록 마음이 조금 가라앉은 하루였어요';
+        case 'annoyed':
+          return '뒤로 갈수록 짜증이 남은 하루였어요';
+        default:
+          break;
+      }
+    }
+
+    if (uniqueCount >= 3 && directionReversals >= 2) {
+      return '감정 기복이 큰 하루였어요';
+    }
+
+    if (topRatio >= 0.6 && topEmotion) {
+      return `${label(topEmotion)}이 가장 많이 남아 있는 하루예요`;
+    }
+
+    return '여러 감정이 함께 남아 있는 하루예요';
+  }, [daySorted, selectedDayEmotionTotal]);
 
   const repEmotionId =
     analysis?.representativeEmotion && typeof analysis.representativeEmotion === 'string'
@@ -183,11 +294,6 @@ export default function CalendarScreen() {
     setSelectedDate(key);
   };
 
-  const dayEntries = useMemo(() => getEntriesForDate(entries, selectedDate), [entries, selectedDate]);
-  const daySorted = useMemo(
-    () => [...dayEntries].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)),
-    [dayEntries],
-  );
   const oneLineCandidates = useMemo(() => {
     return daySorted
       .map((e) => {
@@ -309,38 +415,37 @@ export default function CalendarScreen() {
           </View>
 
           <View style={styles.selectedDetail}>
-            <Text style={styles.selectedDetailTitle}>선택한 날</Text>
             {selectedDayEmotionTotal === 0 ? (
-              <Text style={styles.selectedEmpty}>기록이 없어요</Text>
+              <Text style={styles.selectedEmpty}>아직 이 날의 기록이 없어요</Text>
             ) : (
-              <View style={styles.selectedPreviewRow}>
-                <Text style={styles.selectedPreviewDate}>{formatShortMd(selectedDate)}</Text>
-                <View style={styles.previewBarWrap}>
-                  <View style={styles.previewBarRow}>
-                    {moodOrder.map((emotionId) => {
-                      const n = selectedDayEmotionCounts[emotionId] ?? 0;
-                      return (
-                        <View
-                          key={`pv-${selectedDate}-${emotionId}`}
-                          style={[
-                            styles.previewSegment,
-                            {
-                              flex: n > 0 ? n : 0,
-                              backgroundColor: moodPalette[emotionId].bg,
-                            },
-                          ]}
-                        />
-                      );
-                    })}
-                  </View>
+              <View style={styles.previewBarWrap}>
+                <Text style={styles.previewBarLabel}>감정 비율</Text>
+                <View style={styles.previewBarRow}>
+                  {moodOrder.map((emotionId) => {
+                    const n = selectedDayEmotionCounts[emotionId] ?? 0;
+                    return (
+                      <View
+                        key={`pv-${selectedDate}-${emotionId}`}
+                        style={[
+                          styles.previewSegment,
+                          {
+                            flex: n > 0 ? n : 0,
+                            backgroundColor: moodPalette[emotionId].bg,
+                          },
+                        ]}
+                      />
+                    );
+                  })}
                 </View>
               </View>
             )}
           </View>
 
-          <View style={styles.calendarSummaryWrap}>
-            <Text style={styles.calendarSummaryText}>{summaryText}</Text>
-          </View>
+          {selectedDayEmotionTotal > 0 ? (
+            <View style={styles.calendarSummaryWrap}>
+              <Text style={styles.calendarSummaryText}>{summaryText}</Text>
+            </View>
+          ) : null}
 
           {selectedDayEmotionTotal > 0 ? (
             <Pressable
@@ -353,36 +458,41 @@ export default function CalendarScreen() {
             </Pressable>
           ) : null}
 
-          <Pressable
-            onPress={() => setOneLinePickerVisible(true)}
-            style={({ pressed }) => [styles.repCardWrap, pressed && { opacity: 0.92 }]}
-            accessibilityRole="button"
-            accessibilityLabel="오늘의 한 줄 선택"
-          >
-            <View style={styles.repCardHeader}>
-              <Text style={styles.repCardEmotion}>오늘의 한 줄</Text>
-              {memoTimeText ? <Text style={styles.repCardTime}>{memoTimeText}</Text> : null}
-            </View>
+          {selectedDayEmotionTotal > 0 ? (
+            <Pressable
+              onPress={() => setOneLinePickerVisible(true)}
+              style={({ pressed }) => [styles.repCardWrap, pressed && { opacity: 0.92 }]}
+              accessibilityRole="button"
+              accessibilityLabel="오늘의 한 줄 선택"
+            >
+              <View style={styles.repCardHeader}>
+                <Text style={styles.repCardEmotion}>오늘의 한 줄</Text>
+                {memoTimeText ? <Text style={styles.repCardTime}>{memoTimeText}</Text> : null}
+              </View>
 
-            {hasRepresentativeMemo ? (
-              <>
-                {repCardTitle ? <Text style={styles.repCardTitle}>{repCardTitle}</Text> : null}
-                {repPhotoUriNormalized && !repPhotoFailed ? (
-                  <Image
-                    source={{ uri: repPhotoUriNormalized }}
-                    style={styles.repCardPhoto}
-                    resizeMode="cover"
-                    accessibilityLabel="오늘의 한 줄 사진"
-                    onError={() => setRepPhotoFailed(true)}
-                  />
-                ) : null}
-              </>
-            ) : repEmotionId ? (
-              <Text style={styles.repCardTitle}>{repEmotionFallbackText}</Text>
-            ) : (
-              <Text style={styles.repEmptyText}>오늘의 한 줄을 선택해보세요</Text>
-            )}
-          </Pressable>
+              {hasRepresentativeMemo ? (
+                <>
+                  {repCardTitle ? <Text style={styles.repCardTitle}>{repCardTitle}</Text> : null}
+                  {repPhotoUriNormalized && !repPhotoFailed ? (
+                    <Image
+                      source={{ uri: repPhotoUriNormalized }}
+                      style={styles.repCardPhoto}
+                      resizeMode="cover"
+                      accessibilityLabel="오늘의 한 줄 사진"
+                      onError={() => {
+                        console.log('IMAGE ERROR:', repPhotoUriNormalized);
+                        setRepPhotoFailed(true);
+                      }}
+                    />
+                  ) : null}
+                </>
+              ) : repEmotionId ? (
+                <Text style={styles.repCardTitle}>{repEmotionFallbackText}</Text>
+              ) : (
+                <Text style={styles.repEmptyText}>오늘의 한 줄을 선택해보세요</Text>
+              )}
+            </Pressable>
+          ) : null}
 
           <Modal
             visible={oneLinePickerVisible}
@@ -474,7 +584,7 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     borderColor: notebook.gridLine,
     backgroundColor: 'rgba(255,255,255,0.95)',
-    padding: 14,
+    padding: 18,
   },
   monthRow: {
     flexDirection: 'row',
@@ -541,16 +651,10 @@ const styles = StyleSheet.create({
     color: '#2d3748',
   },
   selectedDetail: {
-    marginTop: 16,
+    marginTop: 22,
     paddingTop: 14,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: notebook.gridLine,
-  },
-  selectedDetailTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: notebook.inkLight,
-    marginBottom: 8,
   },
   selectedEmpty: {
     fontSize: 14,
@@ -558,21 +662,16 @@ const styles = StyleSheet.create({
     color: notebook.inkLight,
     fontStyle: 'italic',
   },
-  selectedPreviewRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  selectedPreviewDate: {
-    width: 44,
-    fontSize: 15,
-    fontWeight: '800',
-    color: notebook.ink,
-    fontVariant: ['tabular-nums'],
-  },
   previewBarWrap: {
     flex: 1,
     minWidth: 0,
+  },
+  previewBarLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: notebook.inkLight,
+    marginBottom: 4,
+    textAlign: 'left',
   },
   previewBarRow: {
     flexDirection: 'row',
@@ -605,20 +704,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   analysisEntry: {
-    marginTop: 12,
-    alignSelf: 'stretch',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    borderRadius: 10,
+    alignSelf: 'center',
+    marginTop: 14,
+    marginBottom: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15, 23, 42, 0.04)',
+    borderWidth: 1,
+    borderColor: notebook.gridLine,
   },
   analysisEntryPressed: {
     opacity: 0.75,
   },
   analysisEntryText: {
     fontSize: 14,
-    fontWeight: '700',
-    color: '#0f766e',
+    fontWeight: '800',
+    color: notebook.inkMuted,
   },
   repCardWrap: {
     marginTop: 18,

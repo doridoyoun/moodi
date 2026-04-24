@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMood } from '../src/context/MoodContext';
@@ -10,9 +10,7 @@ import { formatEntryTime, paletteFor, splitMemo } from '../utils/timelineEntryFo
 function normalizeImageUri(value) {
   const s = typeof value === 'string' ? value.trim() : '';
   if (!s) return null;
-  if (/^(https?:|file:|content:|ph:|assets-library:|blob:|data:)/i.test(s)) return s;
-  if (/^[a-zA-Z]:\\/.test(s)) return s;
-  return null;
+  return s;
 }
 
 function emotionRhythmOffset(emotionId) {
@@ -37,8 +35,9 @@ export default function DailyAnalysisScreen() {
   const { entries, selectedDate } = useMood();
   const [previewUri, setPreviewUri] = useState(null);
   const [readOnlyEntryId, setReadOnlyEntryId] = useState(null);
+  const [readOnlyEntrySnapshot, setReadOnlyEntrySnapshot] = useState(null);
   const [selectedEntryId, setSelectedEntryId] = useState(null);
-  const [showEmotionOnlyRecords, setShowEmotionOnlyRecords] = useState(false);
+  const readOnlySnapshotClearTimerRef = useRef(null);
 
   const analysis = useMemo(
     () => computeDailyAnalysis(entries, selectedDate),
@@ -62,8 +61,16 @@ export default function DailyAnalysisScreen() {
 
   useEffect(() => {
     setSelectedEntryId(null);
-    setShowEmotionOnlyRecords(false);
   }, [selectedDate]);
+
+  useEffect(() => {
+    return () => {
+      if (readOnlySnapshotClearTimerRef.current) {
+        clearTimeout(readOnlySnapshotClearTimerRef.current);
+        readOnlySnapshotClearTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const emotionFlowTimelineItems = useMemo(() => {
     return daySorted.map((e) => {
@@ -135,12 +142,34 @@ export default function DailyAnalysisScreen() {
   }, [analysis, daySorted]);
 
   const dayListMemoItems = useMemo(() => dayListItems.filter((x) => x.hasMemo), [dayListItems]);
-  const dayListEmotionOnlyItems = useMemo(() => dayListItems.filter((x) => !x.hasMemo), [dayListItems]);
 
-  const readOnlyEntry = useMemo(() => {
-    if (!readOnlyEntryId) return null;
-    return daySorted.find((e) => e?.id === readOnlyEntryId) ?? null;
-  }, [daySorted, readOnlyEntryId]);
+  const openReadOnlyEntry = useCallback(
+    (entryId) => {
+      if (!entryId) return;
+      const entry = daySorted.find((e) => e?.id === entryId) ?? null;
+      if (!entry) return;
+      if (readOnlySnapshotClearTimerRef.current) {
+        clearTimeout(readOnlySnapshotClearTimerRef.current);
+        readOnlySnapshotClearTimerRef.current = null;
+      }
+      setReadOnlyEntrySnapshot(entry);
+      setReadOnlyEntryId(entryId);
+    },
+    [daySorted],
+  );
+
+  const closeReadOnlyModal = useCallback(() => {
+    setReadOnlyEntryId(null);
+    if (readOnlySnapshotClearTimerRef.current) {
+      clearTimeout(readOnlySnapshotClearTimerRef.current);
+    }
+    readOnlySnapshotClearTimerRef.current = setTimeout(() => {
+      setReadOnlyEntrySnapshot(null);
+      readOnlySnapshotClearTimerRef.current = null;
+    }, 220);
+  }, []);
+
+  const readOnlyEntry = readOnlyEntrySnapshot;
 
   const readOnlyParts = useMemo(() => {
     const memo = typeof readOnlyEntry?.memo === 'string' ? readOnlyEntry.memo : '';
@@ -154,7 +183,7 @@ export default function DailyAnalysisScreen() {
   const readOnlyPhotoUri = useMemo(() => normalizeImageUri(readOnlyEntry?.imageUri), [readOnlyEntry?.imageUri]);
 
   const changePointText = useMemo(() => {
-    if (daySorted.length < 2) return '감정이 크게 바뀌진 않았어요';
+    if (daySorted.length < 2) return '감정이 크게 바뀌지 않았어요';
 
     /** @type {number[]} */
     const hours = [];
@@ -166,11 +195,10 @@ export default function DailyAnalysisScreen() {
       }
     }
 
-    const uniq = [...new Set(hours.filter((h) => Number.isFinite(h)))];
-    if (uniq.length === 0) return '감정이 크게 바뀌진 않았어요';
-    if (uniq.length === 1) return `${uniq[0]}시에 감정이 바뀌었어요`;
-    if (uniq.length <= 3) return `${uniq.slice(0, 3).map((h) => `${h}시`).join(', ')}에 감정이 바뀌었어요`;
-    return '감정이 여러 번 바뀐 하루예요';
+    const changeCount = [...new Set(hours.filter((h) => Number.isFinite(h)))].length;
+    if (changeCount === 0) return '감정이 크게 바뀌지 않았어요';
+    if (changeCount === 1) return '중간에 감정이 달라졌어요';
+    return '감정이 여러 번 바뀌었어요';
   }, [daySorted]);
 
   return (
@@ -184,8 +212,8 @@ export default function DailyAnalysisScreen() {
 
       {!analysis ? (
         <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>기록이 없어요</Text>
-          <Text style={styles.emptySub}>이 날 남긴 감정이 없어 분석할 수 없어요.</Text>
+          <Text style={styles.emptyTitle}>아직 기록이 없는 하루예요</Text>
+          <Text style={styles.emptySub}>가볍게 감정을 남겨보세요</Text>
         </View>
       ) : (
         <>
@@ -199,9 +227,9 @@ export default function DailyAnalysisScreen() {
               >
                 {emotionFlowTimelineItems.map((item) => {
                   const isSelected = Boolean(item.entryId) && item.entryId === selectedEntryId;
-                  const barOpacity = selectedEntryId ? (isSelected ? 1 : 0.45) : 1;
-                  const barW = item.hasMemo ? 12 : 8;
-                  const barH = 36;
+                  const barOpacity = isSelected ? 1 : 0.42;
+                  const barW = 16;
+                  const barH = 40;
                   const top = emotionRhythmOffset(item.emotionId);
                   return (
                     <Pressable
@@ -210,13 +238,14 @@ export default function DailyAnalysisScreen() {
                         if (!item.entryId) return;
                         setSelectedEntryId((cur) => (cur === item.entryId ? null : item.entryId));
                       }}
-                      hitSlop={10}
+                      hitSlop={{ top: 10, bottom: 10, left: 0, right: 0 }}
                       accessibilityRole="button"
                       accessibilityState={{ selected: isSelected }}
                       accessibilityLabel="감정 순간"
-                      style={({ pressed }) => [styles.flowRhythmItem, pressed && { opacity: 0.92 }]}
+                      style={({ pressed }) => [styles.flowRhythmItem, pressed && styles.flowRhythmItemPressed]}
                     >
                       <View style={[styles.flowRhythmBarWrap, { marginTop: top }]}>
+                        {item.hasMemo ? <View style={styles.flowRhythmMemoDot} /> : null}
                         <View
                           style={[
                             styles.flowRhythmBar,
@@ -230,7 +259,6 @@ export default function DailyAnalysisScreen() {
                           ]}
                         />
                       </View>
-                      {item.hasMemo ? <Text style={styles.flowRhythmMemoLabel}>메모</Text> : null}
                       {isSelected ? (
                         <Text style={styles.flowRhythmSelectedTime}>{item.timeText}</Text>
                       ) : null}
@@ -249,7 +277,7 @@ export default function DailyAnalysisScreen() {
                 감정 흐름에서 순간을 눌러 그때의 기록을 볼 수 있어요
               </Text>
             ) : !selectedFlowEntry.hasMemo ? (
-              <Text style={styles.segmentDetailHint}>이 순간에는 남긴 메모가 없어요</Text>
+              <Text style={styles.segmentDetailHint}>이 순간엔 따로 남긴 메모는 없어요</Text>
             ) : (
               <View style={[styles.segmentMemoItem, { borderTopWidth: 0, paddingTop: 0 }]}>
                 <Text style={styles.segmentMemoTime}>{selectedFlowEntry.timeText}</Text>
@@ -283,102 +311,59 @@ export default function DailyAnalysisScreen() {
           <View style={styles.dayListSection}>
             <Text style={styles.sectionTitle}>오늘 기록</Text>
 
-            {dayListMemoItems.map((item, idx) => {
-              const emotionPal = paletteFor(item.emotionId);
-              const hasEmotionBlockBelow = dayListEmotionOnlyItems.length > 0;
-              const isLastMemoOnly =
-                idx === dayListMemoItems.length - 1 && !hasEmotionBlockBelow;
-              return (
-                <Pressable
-                  key={item.id}
-                  onPress={() => {
-                    if (item.entryId) setReadOnlyEntryId(item.entryId);
-                  }}
-                  style={({ pressed }) => [
-                    styles.dayListItem,
-                    isLastMemoOnly ? { marginBottom: 0 } : null,
-                    pressed && { opacity: 0.92 },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${item.timeText} 메모 열기`}
-                >
-                  <Text style={styles.dayListTime}>{item.timeText}</Text>
-                  <View style={styles.dayListContent}>
-                    <View style={[styles.emotionDot, { backgroundColor: emotionPal.border }]} />
-                    <View style={styles.dayListTextRow}>
-                      <Text
-                        style={[
-                          styles.dayListText,
-                          item.isRepresentative ? styles.dayListTextRep : null,
-                        ]}
-                        numberOfLines={3}
-                      >
-                        {item.memoPreview}
-                      </Text>
-                      {item.hasPhoto ? (
-                        <Pressable
-                          onPress={() => {
-                            if (item.imageUri) setPreviewUri(item.imageUri);
-                          }}
-                          hitSlop={10}
-                          accessibilityRole="button"
-                          accessibilityLabel="사진 미리보기"
-                          style={({ pressed }) => [pressed && { opacity: 0.7 }]}
+            {dayListMemoItems.length === 0 ? (
+              <Text style={styles.segmentDetailHint}>이 순간엔 따로 남긴 메모는 없어요</Text>
+            ) : (
+              dayListMemoItems.map((item, idx) => {
+                const emotionPal = paletteFor(item.emotionId);
+                const isLastMemoOnly = idx === dayListMemoItems.length - 1;
+                return (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => {
+                      if (readOnlyEntryId) return;
+                      if (item.entryId) openReadOnlyEntry(item.entryId);
+                    }}
+                    style={({ pressed }) => [
+                      styles.dayListItem,
+                      isLastMemoOnly ? { marginBottom: 0 } : null,
+                      pressed && { opacity: 0.92 },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${item.timeText} 메모 열기`}
+                  >
+                    <Text style={styles.dayListTime}>{item.timeText}</Text>
+                    <View style={styles.dayListContent}>
+                      <View style={[styles.emotionDot, { backgroundColor: emotionPal.border }]} />
+                      <View style={styles.dayListTextRow}>
+                        <Text
+                          style={[
+                            styles.dayListText,
+                            item.isRepresentative ? styles.dayListTextRep : null,
+                          ]}
+                          numberOfLines={3}
                         >
-                          <Text style={styles.photoIndicator}>📷</Text>
-                        </Pressable>
-                      ) : null}
+                          {item.memoPreview}
+                        </Text>
+                        {item.hasPhoto ? (
+                          <Pressable
+                            onPress={() => {
+                              if (item.imageUri) setPreviewUri(item.imageUri);
+                            }}
+                            hitSlop={10}
+                            accessibilityRole="button"
+                            accessibilityLabel="사진 미리보기"
+                            style={({ pressed }) => [pressed && { opacity: 0.7 }]}
+                          >
+                            <Text style={styles.photoIndicator}>📷</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
                     </View>
-                  </View>
-                </Pressable>
-              );
-            })}
-
-            {dayListEmotionOnlyItems.length > 0 ? (
-              <>
-                <Pressable
-                  onPress={() => setShowEmotionOnlyRecords((v) => !v)}
-                  style={({ pressed }) => [
-                    styles.dayListEmotionOnlySummaryPressable,
-                    showEmotionOnlyRecords ? { marginBottom: 8 } : { marginBottom: 0 },
-                    pressed && { opacity: 0.88 },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityState={{ expanded: showEmotionOnlyRecords }}
-                  accessibilityLabel={`감정만 기록된 순간 ${dayListEmotionOnlyItems.length}개`}
-                >
-                  <View style={styles.dayListEmotionOnlyGridRow}>
-                    <View style={styles.dayListEmotionOnlyTimeSpacer} />
-                    <View style={styles.dayListEmotionOnlyDotSpacer} />
-                    <View style={styles.dayListEmotionOnlyTextCol}>
-                      <Text style={styles.dayListEmotionOnlySummaryText}>
-                        감정만 기록된 순간 {dayListEmotionOnlyItems.length}개
-                      </Text>
-                    </View>
-                  </View>
-                </Pressable>
-                {showEmotionOnlyRecords
-                  ? dayListEmotionOnlyItems.map((item, idx) => {
-                      const pal = paletteFor(item.emotionId);
-                      const isLastEmotionRow = idx === dayListEmotionOnlyItems.length - 1;
-                      return (
-                        <View
-                          key={item.id}
-                          style={[styles.dayListEmotionOnlyRow, isLastEmotionRow ? { marginBottom: 0 } : null]}
-                        >
-                          <View style={styles.dayListEmotionOnlyGridRow}>
-                            <Text style={styles.dayListEmotionOnlyTime}>{item.timeText}</Text>
-                            <View style={styles.dayListEmotionOnlyDotSpacer} />
-                            <View style={styles.dayListEmotionOnlyTextCol}>
-                              <Text style={styles.dayListEmotionOnlyLabel}>{pal.label}</Text>
-                            </View>
-                          </View>
-                        </View>
-                      );
-                    })
-                  : null}
-              </>
-            ) : null}
+                  </Pressable>
+                );
+              })
+            )}
           </View>
         </>
       )}
@@ -408,7 +393,10 @@ export default function DailyAnalysisScreen() {
                   source={{ uri: previewUri }}
                   style={styles.previewImage}
                   resizeMode="contain"
-                  onError={() => setPreviewUri(null)}
+                  onError={() => {
+                    console.log('IMAGE ERROR:', previewUri);
+                    setPreviewUri(null);
+                  }}
                 />
               ) : null}
             </Pressable>
@@ -417,53 +405,59 @@ export default function DailyAnalysisScreen() {
       </Modal>
 
       <Modal
-        visible={readOnlyEntry != null}
+        visible={readOnlyEntrySnapshot != null}
         transparent
         animationType="fade"
-        onRequestClose={() => setReadOnlyEntryId(null)}
+        onRequestClose={closeReadOnlyModal}
+        onDismiss={() => setReadOnlyEntrySnapshot(null)}
       >
-        <View style={styles.readOnlyRoot}>
-          <Pressable
-            style={styles.readOnlyBackdrop}
-            onPress={() => setReadOnlyEntryId(null)}
-            accessibilityRole="button"
-            accessibilityLabel="닫기"
-          />
-          <View style={styles.readOnlyCard} pointerEvents="box-none">
-            <View style={styles.readOnlyHeader}>
-              <View style={styles.readOnlyHeaderLeft}>
-                <Text style={styles.readOnlyEmotion}>{paletteFor(normEmotionId(readOnlyEntry?.emotionId)).label}</Text>
-                <Text style={styles.readOnlyTime}>{formatEntryTime(readOnlyEntry?.createdAt)}</Text>
+        {readOnlyEntrySnapshot ? (
+          <View style={styles.readOnlyRoot}>
+            <Pressable
+              style={styles.readOnlyBackdrop}
+              onPress={closeReadOnlyModal}
+              accessibilityRole="button"
+              accessibilityLabel="닫기"
+            />
+            <View style={styles.readOnlyCard}>
+              <View style={styles.readOnlyHeader}>
+                <View style={styles.readOnlyHeaderLeft}>
+                  <Text style={styles.readOnlyEmotion}>
+                    {paletteFor(normEmotionId(readOnlyEntrySnapshot?.emotionId)).label}
+                  </Text>
+                  <Text style={styles.readOnlyTime}>{formatEntryTime(readOnlyEntrySnapshot?.createdAt)}</Text>
+                </View>
+                <Pressable
+                  onPress={closeReadOnlyModal}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="닫기"
+                  style={({ pressed }) => [styles.readOnlyClose, pressed && { opacity: 0.75 }]}
+                >
+                  <Text style={styles.readOnlyCloseText}>닫기</Text>
+                </Pressable>
               </View>
-              <Pressable
-                onPress={() => setReadOnlyEntryId(null)}
-                hitSlop={10}
-                accessibilityRole="button"
-                accessibilityLabel="닫기"
-                style={({ pressed }) => [styles.readOnlyClose, pressed && { opacity: 0.75 }]}
-              >
-                <Text style={styles.readOnlyCloseText}>닫기</Text>
-              </Pressable>
+
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.readOnlyScrollContent}>
+                {readOnlyParts.title ? <Text style={styles.readOnlyTitle}>{readOnlyParts.title}</Text> : null}
+                {readOnlyParts.content ? (
+                  <Text style={styles.readOnlyBody}>{readOnlyParts.content}</Text>
+                ) : !readOnlyParts.title ? (
+                  <Text style={styles.readOnlyMuted}>(내용 없음)</Text>
+                ) : null}
+
+                {readOnlyPhotoUri ? (
+                  <Image
+                    source={{ uri: readOnlyPhotoUri }}
+                    style={styles.readOnlyPhoto}
+                    resizeMode="cover"
+                    onError={() => console.log('IMAGE ERROR:', readOnlyPhotoUri)}
+                  />
+                ) : null}
+              </ScrollView>
             </View>
-
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.readOnlyScrollContent}>
-              {readOnlyParts.title ? <Text style={styles.readOnlyTitle}>{readOnlyParts.title}</Text> : null}
-              {readOnlyParts.content ? (
-                <Text style={styles.readOnlyBody}>{readOnlyParts.content}</Text>
-              ) : !readOnlyParts.title ? (
-                <Text style={styles.readOnlyMuted}>(내용 없음)</Text>
-              ) : null}
-
-              {readOnlyPhotoUri ? (
-                <Image
-                  source={{ uri: readOnlyPhotoUri }}
-                  style={styles.readOnlyPhoto}
-                  resizeMode="cover"
-                />
-              ) : null}
-            </ScrollView>
           </View>
-        </View>
+        ) : null}
       </Modal>
     </ScrollView>
   );
@@ -521,24 +515,30 @@ const styles = StyleSheet.create({
   },
   flowRhythmBox: {
     marginTop: 4,
-    height: 152,
+    height: 160,
   },
   flowRhythmContent: {
     alignItems: 'flex-start',
+    paddingLeft: 16,
     paddingRight: 6,
     paddingBottom: 20,
   },
   flowRhythmItem: {
-    height: 152,
-    width: 12,
+    height: 160,
+    width: 20,
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'flex-start',
-    marginRight: 2,
+    marginRight: 0,
+  },
+  flowRhythmItemPressed: {
+    backgroundColor: 'rgba(15, 23, 42, 0.03)',
+    borderRadius: 10,
   },
   flowRhythmBarWrap: {
     alignItems: 'center',
     justifyContent: 'flex-start',
+    position: 'relative',
   },
   flowRhythmBar: {
     borderRadius: 999,
@@ -547,13 +547,13 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'rgba(79, 70, 229, 0.5)',
   },
-  flowRhythmMemoLabel: {
+  flowRhythmMemoDot: {
     position: 'absolute',
-    bottom: 16,
-    fontSize: 11,
-    fontWeight: '700',
-    color: notebook.inkMuted,
-    textAlign: 'center',
+    top: -9,
+    width: 5,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: notebook.inkMuted,
   },
   flowRhythmSelectedTime: {
     position: 'absolute',

@@ -13,7 +13,11 @@ export default function NotebookLayout({ children, footer }) {
         <NotebookBackground />
         <NotebookHeader />
         <View style={[styles.body, !footer && { paddingBottom: bottomPad }]}>{children}</View>
-        {footer ? <View style={styles.footer}>{footer}</View> : null}
+        {footer ? (
+          <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+            {footer}
+          </View>
+        ) : null}
       </View>
     </SafeAreaView>
   );

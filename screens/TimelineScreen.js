@@ -57,6 +57,25 @@ function getOneLineDailySummary(dayEntries) {
   const total = sorted.length;
   const uniqueEmotions = Object.keys(counts).length;
 
+  // If all emotions are the same, return early.
+  if (uniqueEmotions === 1) {
+    const onlyId = Object.keys(counts)[0] ?? null;
+    switch (onlyId) {
+      case 'happy':
+        return '기분 좋은 순간이 이어졌어요';
+      case 'flutter':
+        return '설렘이 이어진 하루였어요';
+      case 'calm':
+        return '평온하게 이어진 하루였어요';
+      case 'gloom':
+        return '마음이 조금 가라앉아 있던 하루였어요';
+      case 'annoyed':
+        return '짜증이 이어진 하루였어요';
+      default:
+        return '감정이 한 가지로 이어진 하루였어요';
+    }
+  }
+
   const byBucket = { morning: 0, afternoon: 0, evening: 0, night: 0 };
   for (const e of sorted) {
     const h = typeof e?.hour === 'number' ? e.hour : null;
@@ -193,6 +212,7 @@ export default function TimelineScreen() {
   const [overlayVisible, setOverlayVisible] = useState(false);
   const [detailEntryId, setDetailEntryId] = useState(null);
   const [isDetailEditing, setIsDetailEditing] = useState(false);
+  const [isQuickMemoEditing, setIsQuickMemoEditing] = useState(false);
   const [detailEditEmotion, setDetailEditEmotion] = useState('happy');
   const [detailEditTitle, setDetailEditTitle] = useState('');
   const [detailEditContent, setDetailEditContent] = useState('');
@@ -320,6 +340,7 @@ export default function TimelineScreen() {
     const e = detailEntry;
     if (!e) return;
     const { title, content } = splitMemo(e.memo);
+    setIsQuickMemoEditing(false);
     setDetailEditEmotion(e.emotionId);
     setDetailEditTitle(title);
     setDetailEditContent(content);
@@ -329,6 +350,7 @@ export default function TimelineScreen() {
 
   const cancelDetailEdit = useCallback(() => {
     setIsDetailEditing(false);
+    setIsQuickMemoEditing(false);
     Keyboard.dismiss();
     if (detailEntry) {
       setDetailEditImageUri(
@@ -349,6 +371,10 @@ export default function TimelineScreen() {
         : '';
     updateEntry(e.id, { emotionId: detailEditEmotion, memo, imageUri: uri });
     setIsDetailEditing(false);
+    if (isQuickMemoEditing) {
+      setDetailEntryId(null);
+      setIsQuickMemoEditing(false);
+    }
     Keyboard.dismiss();
   }, [
     detailEditContent,
@@ -356,6 +382,7 @@ export default function TimelineScreen() {
     detailEditImageUri,
     detailEditTitle,
     detailEntry,
+    isQuickMemoEditing,
     updateEntry,
   ]);
 
@@ -367,6 +394,7 @@ export default function TimelineScreen() {
     setMemoPromptEntryId(null);
     setDetailEntryId(null);
     setIsDetailEditing(false);
+    setIsQuickMemoEditing(false);
     setDetailEditImageUri(null);
     Keyboard.dismiss();
   }, []);
@@ -477,6 +505,7 @@ export default function TimelineScreen() {
   const openDetailFromOverlay = useCallback(
     (entryId) => {
       setIsDetailEditing(false);
+      setIsQuickMemoEditing(false);
       setDetailEntryId(entryId);
       closeEntryOverlay();
     },
@@ -495,6 +524,7 @@ export default function TimelineScreen() {
     if (!e) return;
     const { title, content } = splitMemo(e.memo);
     setDetailEntryId(id);
+    setIsQuickMemoEditing(true);
     setDetailEditEmotion(e.emotionId);
     setDetailEditTitle(title);
     setDetailEditContent(content);

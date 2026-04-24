@@ -121,7 +121,12 @@ function ReadOnlySlot({ item, slotW, slotH, fv }) {
           },
         ]}
       >
-        <Image source={{ uri: item.imageUri }} style={styles.slotImg} resizeMode="cover" />
+        <Image
+          source={{ uri: item.imageUri }}
+          style={styles.slotImg}
+          resizeMode="cover"
+          onError={() => console.log('IMAGE ERROR:', item.imageUri)}
+        />
       </View>
     );
   }

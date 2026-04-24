@@ -8,19 +8,19 @@ import { moodOrder, moodPalette, notebook } from '../constants/theme';
 
 const SLIDES = [
   {
-    headline: '오늘의 감정을 가볍게 남겨보세요',
-    sub: '복잡하게 적지 않아도 괜찮아요\n한 번의 터치로 충분해요',
+    headline: '지금, 어떤 기분이에요?',
+    sub: '',
+    visual: 'none',
+  },
+  {
+    headline: '그 순간의 감정을 눌러보세요',
+    sub: '',
     visual: 'emotions',
   },
   {
-    headline: '감정은 흐름으로 쌓여요',
-    sub: '하루를 지나며\n감정이 자연스럽게 이어져요',
+    headline: '하루를 한눈에 돌아볼 수 있어요,\n바로 시작해볼까요?',
+    sub: '',
     visual: 'timeline',
-  },
-  {
-    headline: '하루를 하나의 장면으로',
-    sub: '감정과 사진을 모아\n오늘을 남겨보세요',
-    visual: 'grid',
   },
 ];
 
@@ -174,9 +174,11 @@ export default function OnboardingScreen({ onComplete }) {
           <AnimatedSlide active>
             <View style={styles.topSpacer} />
             <Text style={styles.headline}>{slide.headline}</Text>
-            <Text style={styles.subtext} numberOfLines={2}>
-              {slide.sub}
-            </Text>
+            {slide.sub ? (
+              <Text style={styles.subtext} numberOfLines={2}>
+                {slide.sub}
+              </Text>
+            ) : null}
             <View style={styles.visualMount}>
               {slide.visual === 'emotions' && <VisualEmotionRow />}
               {slide.visual === 'timeline' && <VisualTimelineBar />}

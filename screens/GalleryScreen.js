@@ -357,7 +357,12 @@ function MoodiSlotPhoto({
           { borderColor: pal.border, backgroundColor: photoWellBg },
         ]}
       >
-        <Image source={{ uri: item.imageUri }} style={moodiCanvasStyles.slotImg} resizeMode="cover" />
+        <Image
+          source={{ uri: item.imageUri }}
+          style={moodiCanvasStyles.slotImg}
+          resizeMode="cover"
+          onError={() => console.log('IMAGE ERROR:', item.imageUri)}
+        />
       </View>
     );
     if (!onPress) {
@@ -1178,7 +1183,11 @@ export default function GalleryScreen() {
                         ]}
                         onPress={() => selectAlbumForSlot(item.id)}
                       >
-                        <Image source={{ uri: item.imageUri }} style={styles.pickerThumb} />
+                        <Image
+                          source={{ uri: item.imageUri }}
+                          style={styles.pickerThumb}
+                          onError={() => console.log('IMAGE ERROR:', item.imageUri)}
+                        />
                       </Pressable>
                     );
                   })}

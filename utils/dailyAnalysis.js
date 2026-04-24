@@ -3,6 +3,7 @@ import {
   getEntriesForDate,
   getEntryTimelineHour,
 } from '../storage/timelineStateStorage';
+import { moodPalette } from '../constants/theme';
 
 const VALID = new Set(['happy', 'flutter', 'calm', 'gloom', 'annoyed']);
 
@@ -352,67 +353,61 @@ const TRIPLE_LINES = new Map(
 );
 
 function oneLineSummary(first, dominant, last) {
-  if (!first || !dominant || !last) return '평온한 하루였어요';
-
-  const isPos = (id) => id === 'happy' || id === 'flutter';
-  const isNeg = (id) => id === 'gloom' || id === 'annoyed';
-  const polarity = (id) => (isPos(id) ? 'pos' : isNeg(id) ? 'neg' : 'neutral');
-
   /** @type {number | null} */
-  const uniqueCount = typeof oneLineSummary.uniqueCount === 'number' ? oneLineSummary.uniqueCount : null;
+  const entryUniqCount =
+    typeof oneLineSummary.entryUniqCount === 'number' ? oneLineSummary.entryUniqCount : null;
   /** @type {number | null} */
-  const switchCount = typeof oneLineSummary.switchCount === 'number' ? oneLineSummary.switchCount : null;
+  const changeCount = typeof oneLineSummary.changeCount === 'number' ? oneLineSummary.changeCount : null;
   /** @type {string | null} */
-  const lateDominant = typeof oneLineSummary.lateDominant === 'string' ? oneLineSummary.lateDominant : null;
-  /** @type {string | null} */
-  const earlyDominant = typeof oneLineSummary.earlyDominant === 'string' ? oneLineSummary.earlyDominant : null;
+  const dominantEntryEmotionId =
+    typeof oneLineSummary.dominantEntryEmotionId === 'string' ? oneLineSummary.dominantEntryEmotionId : null;
   /** @type {number | null} */
-  const repRatio = typeof oneLineSummary.repRatio === 'number' ? oneLineSummary.repRatio : null;
+  const dominantEntryRatio =
+    typeof oneLineSummary.dominantEntryRatio === 'number' ? oneLineSummary.dominantEntryRatio : null;
+  /** @type {string | null} */
+  const lastEntryEmotionId =
+    typeof oneLineSummary.lastEntryEmotionId === 'string' ? oneLineSummary.lastEntryEmotionId : null;
 
-  const firstId = normEmotionId(first);
-  const lastId = normEmotionId(last);
-  const domId = normEmotionId(dominant);
-  const earlyId = earlyDominant ? normEmotionId(earlyDominant) : null;
-  const lateId = lateDominant ? normEmotionId(lateDominant) : null;
+  const firstId = first ? normEmotionId(first) : null;
+  const lastId = last ? normEmotionId(last) : null;
+  const domId = dominant ? normEmotionId(dominant) : null;
 
-  const uniq = uniqueCount ?? new Set([firstId, domId, lastId].filter(Boolean)).size;
-  const switches = switchCount ?? ((firstId !== domId ? 1 : 0) + (domId !== lastId ? 1 : 0));
+  const uniq =
+    entryUniqCount ?? new Set([firstId, domId, lastId].filter(Boolean)).size;
 
-  // CASE 1: High variability (MOST IMPORTANT)
-  if (uniq >= 3 || switches >= 2) return '감정 기복이 큰 하루네요';
+  const emotionLabel = (id) => {
+    const nid = id ? normEmotionId(id) : null;
+    return nid && moodPalette[nid] ? moodPalette[nid].label : '감정';
+  };
 
-  // CASE 2: Strong late emotion
-  // Treat lateDominant as "clear" when it matches the last emotion, or differs from earlyDominant.
-  if (lateId && (lateId === lastId || (earlyId && lateId !== earlyId))) {
-    if (lateId === 'happy') return '마지막엔 기분이 풀린 하루네요';
-    if (lateId === 'flutter') return '마지막엔 설렘이 남은 하루네요';
-    if (lateId === 'calm') return '평온한 하루네요';
-    if (lateId === 'gloom') return '뒤로 갈수록 조금 가라앉았네요';
-    if (lateId === 'annoyed') return '나중에는 짜증이 남았네요';
+  // 1) Single emotion (highest priority)
+  if (uniq === 1) {
+    const onlyId = dominantEntryEmotionId || domId || firstId || lastId || lastEntryEmotionId;
+    const oid = onlyId ? normEmotionId(onlyId) : null;
+    if (oid === 'happy') return '기분 좋은 순간이 이어졌어요';
+    if (oid === 'flutter') return '설렘이 이어진 하루였어요';
+    if (oid === 'calm') return '평온하게 이어진 하루였어요';
+    if (oid === 'gloom') return '마음이 조금 가라앉아 있던 하루였어요';
+    if (oid === 'annoyed') return '짜증이 이어진 하루였어요';
+    return '평온한 하루였어요';
   }
 
-  // CASE 3: Clear contrast (optional)
-  if (earlyId && lateId && earlyId !== lateId) {
-    const earlyPol = polarity(earlyId);
-    const latePol = polarity(lateId);
-    if (earlyPol === 'pos' && latePol === 'neg') return '기분이 좋았는데 조금 가라앉았네요';
-    if (earlyPol === 'neg' && latePol === 'pos') return '중간에 기분이 조금 풀렸네요';
+  // 2) Emotional fluctuation (before mixed / dominant tail)
+  if (changeCount != null && changeCount >= 2) return '감정 기복이 큰 하루였어요';
+
+  // 3) Dominant emotion
+  if (dominantEntryRatio != null && dominantEntryRatio >= 0.5 && dominantEntryEmotionId) {
+    return `${emotionLabel(dominantEntryEmotionId)}이 가장 많이 남아 있는 하루예요`;
   }
 
-  // CASE 4: TRUE single emotion (strict)
-  if (repRatio != null && repRatio >= 0.65 && uniq <= 2 && switches <= 1) {
-    const map = {
-      happy: '기분이 좋은 하루네요',
-      flutter: '설렘이 느껴진 하루네요',
-      calm: '평온한 하루네요',
-      gloom: '조금 가라앉는 날이었네요',
-      annoyed: '짜증나는 일이 있었던 날이었네요',
-    };
-    if (map[domId]) return map[domId];
-  }
+  // 4) Mixed emotions
+  if (uniq >= 2) return '여러 감정이 함께 남아 있는 하루예요';
 
-  // CASE 5: fallback
-  return domId === 'calm' ? '평온한 하루였어요' : '조용히 지나간 하루네요';
+  // 5) Ending emotion (fallback only)
+  const endId = lastEntryEmotionId || lastId;
+  if (endId) return `마지막엔 ${emotionLabel(endId)}이 느껴졌어요`;
+
+  return '평온한 하루였어요';
 }
 
 function dominantEmotionFromPoints(points) {
@@ -439,6 +434,8 @@ function dominantEmotionFromPoints(points) {
 export function computeDailyAnalysis(entries, dateKey) {
   const day = getEntriesForDate(entries, dateKey);
   if (!day.length) return null;
+
+  const sortedDay = [...day].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 
   const topTwo = computeTopTwoEmotionIdsFromEntries(entries, dateKey);
   const representativeEmotion = topTwo[0] ? normEmotionId(topTwo[0]) : null;
@@ -498,24 +495,45 @@ export function computeDailyAnalysis(entries, dateKey) {
   const lastFlow = pts.length ? normEmotionId(pts[pts.length - 1].emotionId) : null;
   const dominantFlow = dominantEmotionFromPoints(pts) || representativeEmotion || firstFlow;
 
-  // Provide oneLineSummary with day-level signals (keeps computeDailyAnalysis return shape stable).
-  const uniqEmotions = new Set(pts.map((p) => normEmotionId(p.emotionId))).size;
-  let switches = 0;
-  for (let i = 1; i < pts.length; i += 1) {
-    if (normEmotionId(pts[i].emotionId) !== normEmotionId(pts[i - 1].emotionId)) switches += 1;
+  const entryUniqCount = Object.keys(counts).length;
+  let changeCount = 0;
+  for (let i = 1; i < sortedDay.length; i += 1) {
+    if (normEmotionId(sortedDay[i]?.emotionId) !== normEmotionId(sortedDay[i - 1]?.emotionId)) {
+      changeCount += 1;
+    }
   }
-  const halfIdx = Math.floor(pts.length / 2);
-  const earlyPts = pts.slice(0, Math.max(1, halfIdx));
-  const latePts = pts.slice(Math.max(0, halfIdx));
-  const earlyDominant = dominantEmotionFromPoints(earlyPts);
-  const lateDominant = dominantEmotionFromPoints(latePts);
-  const repRatio = totalEntryCount > 0 ? representativeEmotionCount / totalEntryCount : 0;
 
-  oneLineSummary.uniqueCount = uniqEmotions;
-  oneLineSummary.switchCount = switches;
-  oneLineSummary.earlyDominant = earlyDominant;
-  oneLineSummary.lateDominant = lateDominant;
-  oneLineSummary.repRatio = repRatio;
+  let dominantEntryEmotionId = null;
+  let dominantEntryRatio = 0;
+  if (totalEntryCount > 0) {
+    /** @type {Record<string, number>} */
+    const lastIdxById = {};
+    for (let i = 0; i < sortedDay.length; i += 1) {
+      const id = normEmotionId(sortedDay[i]?.emotionId);
+      lastIdxById[id] = i;
+    }
+
+    const ids = Object.keys(counts);
+    ids.sort((a, b) => {
+      if ((counts[b] || 0) !== (counts[a] || 0)) return (counts[b] || 0) - (counts[a] || 0);
+      const la = lastIdxById[normEmotionId(a)] ?? -1;
+      const lb = lastIdxById[normEmotionId(b)] ?? -1;
+      return lb - la;
+    });
+    dominantEntryEmotionId = ids[0] ? normEmotionId(ids[0]) : null;
+    dominantEntryRatio =
+      dominantEntryEmotionId != null ? (counts[dominantEntryEmotionId] ?? 0) / totalEntryCount : 0;
+  }
+
+  const lastEntryEmotionId = sortedDay.length
+    ? normEmotionId(sortedDay[sortedDay.length - 1]?.emotionId)
+    : null;
+
+  oneLineSummary.entryUniqCount = entryUniqCount;
+  oneLineSummary.changeCount = changeCount;
+  oneLineSummary.dominantEntryEmotionId = dominantEntryEmotionId;
+  oneLineSummary.dominantEntryRatio = dominantEntryRatio;
+  oneLineSummary.lastEntryEmotionId = lastEntryEmotionId;
 
   const summary = oneLineSummary(firstFlow, dominantFlow, lastFlow);
 

@@ -18,9 +18,7 @@ const moodIcons = {
 function normalizeImageUri(value) {
   const s = typeof value === 'string' ? value.trim() : '';
   if (!s) return null;
-  if (/^(https?:|file:|content:|ph:|assets-library:|blob:|data:)/i.test(s)) return s;
-  if (/^[a-zA-Z]:\\/.test(s)) return s;
-  return null;
+  return s;
 }
 
 export default function EntryDetailModalCard({
@@ -62,9 +60,10 @@ export default function EntryDetailModalCard({
       aspect: [3, 4],
       quality: 0.85,
     });
-    if (!result.canceled && result.assets?.[0]?.uri && setDetailEditImageUri) {
-      setDetailEditImageUri(result.assets[0].uri);
-    }
+    if (result.canceled) return;
+    const uri = result.assets?.[0]?.uri;
+    if (typeof uri !== 'string' || uri.trim().length === 0) return;
+    setDetailEditImageUri?.(uri);
   }, [setDetailEditImageUri]);
 
   const clearPhoto = useCallback(() => {
@@ -143,7 +142,10 @@ export default function EntryDetailModalCard({
                     source={{ uri: viewPhotoUri }}
                     style={styles.viewPhoto}
                     resizeMode="cover"
-                    onError={() => setViewPhotoFailed(true)}
+                    onError={() => {
+                      console.log('IMAGE ERROR:', viewPhotoUri);
+                      setViewPhotoFailed(true);
+                    }}
                   />
                 ) : null}
               </View>
@@ -199,7 +201,10 @@ export default function EntryDetailModalCard({
                   source={{ uri: editPhotoUri }}
                   style={styles.editPhoto}
                   resizeMode="cover"
-                  onError={() => setEditPhotoFailed(true)}
+                  onError={() => {
+                    console.log('IMAGE ERROR:', editPhotoUri);
+                    setEditPhotoFailed(true);
+                  }}
                 />
               ) : null}
               <View style={styles.photoActions}>

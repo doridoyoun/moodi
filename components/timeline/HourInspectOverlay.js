@@ -111,6 +111,8 @@ export default function HourInspectOverlay({
               {memoEntriesNewestFirst.map((entry, index) => {
                 const { title } = splitMemo(entry.memo);
                 const titleLine = (title || '').trim();
+                const imageUri = typeof entry?.imageUri === 'string' ? entry.imageUri.trim() : '';
+                const hasPhoto = Boolean(imageUri);
                 const isLast = index === memoEntriesNewestFirst.length - 1;
                 return (
                   <Pressable
@@ -132,9 +134,12 @@ export default function HourInspectOverlay({
                     />
                     <View style={styles.memoRowMid}>
                       <Text style={styles.memoTime}>{formatEntryTime(entry.createdAt)}</Text>
-                      <Text style={styles.memoTitle} numberOfLines={2} ellipsizeMode="tail">
-                        {titleLine}
-                      </Text>
+                      <View style={styles.memoTitleRow}>
+                        <Text style={styles.memoTitle} numberOfLines={2} ellipsizeMode="tail">
+                          {titleLine}
+                        </Text>
+                        {hasPhoto ? <Text style={styles.memoPhotoIcon}>📷</Text> : null}
+                      </View>
                     </View>
                   </Pressable>
                 );
@@ -241,6 +246,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: notebook.ink,
     lineHeight: 21,
+  },
+  memoTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  memoPhotoIcon: {
+    fontSize: 12,
+    color: notebook.inkLight,
+    paddingTop: 2,
   },
   empty: {
     fontSize: 13,
