@@ -8,14 +8,15 @@ import { notebook } from '../constants/theme';
 
 const Tab = createBottomTabNavigator();
 
-/** Extra top padding inside the tab bar (taller, easier targets). */
-const TAB_BAR_MIN_TOP = 20;
+/** Extra top padding inside the tab bar. */
+const TAB_BAR_MIN_TOP = 10;
 
 const TAB_ICON_SIZE = 30;
 
 export default function MainTabs() {
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, 12);
+  const minHeight = TAB_BAR_MIN_TOP + TAB_ICON_SIZE + bottomPad + 14;
 
   return (
     <Tab.Navigator
@@ -24,6 +25,7 @@ export default function MainTabs() {
         tabBarActiveTintColor: notebook.ink,
         tabBarInactiveTintColor: notebook.inkLight,
         tabBarHideOnKeyboard: true,
+        tabBarShowLabel: false,
         tabBarStyle: {
           backgroundColor: 'rgba(255,255,255,0.96)',
           borderTopWidth: StyleSheet.hairlineWidth,
@@ -31,21 +33,15 @@ export default function MainTabs() {
           paddingTop: TAB_BAR_MIN_TOP,
           paddingBottom: bottomPad,
           paddingHorizontal: 8,
-          minHeight: 88,
+          minHeight,
         },
         tabBarIconStyle: {
-          marginBottom: 0,
-        },
-        tabBarLabelStyle: {
-          fontSize: 13,
-          fontWeight: '600',
-          marginTop: 3,
           marginBottom: 0,
         },
         tabBarItemStyle: {
           justifyContent: 'center',
           alignItems: 'center',
-          paddingVertical: 6,
+          paddingVertical: 4,
         },
       }}
     >

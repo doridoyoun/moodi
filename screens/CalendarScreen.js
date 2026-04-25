@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Surface } from 'react-native-paper';
@@ -30,12 +30,6 @@ const EMOTION_LEVEL = {
   annoyed: 1,
 };
 
-function normalizeImageUri(value) {
-  const s = typeof value === 'string' ? value.trim() : '';
-  if (!s) return null;
-  return s;
-}
-
 function buildMonthGrid(year, monthIndex) {
   const first = new Date(year, monthIndex, 1);
   const startWeekday = first.getDay();
@@ -63,7 +57,6 @@ export default function CalendarScreen() {
   const navigation = useNavigation();
   const { entries, selectedDate, setSelectedDate, setRepresentativeOverrideForDate } = useMood();
   const [cursor, setCursor] = useState(() => new Date());
-  const [repPhotoFailed, setRepPhotoFailed] = useState(false);
   const [oneLinePickerVisible, setOneLinePickerVisible] = useState(false);
 
   useEffect(() => {
@@ -238,11 +231,6 @@ export default function CalendarScreen() {
     analysis?.representativeMemo && typeof analysis.representativeMemo === 'string'
       ? analysis.representativeMemo
       : null;
-  const representativePhoto =
-    analysis?.representativePhotoUri && typeof analysis.representativePhotoUri === 'string'
-      ? analysis.representativePhotoUri
-      : null;
-
   const hasRepresentativeMemo = Boolean(representativeMemo && representativeMemo.trim().length > 0);
 
   const repMemoParts = representativeMemo ? splitMemo(representativeMemo) : { title: '', content: '' };
@@ -256,14 +244,6 @@ export default function CalendarScreen() {
     const oneLine = src.split('\n').map((x) => x.trim()).find(Boolean) || '';
     return oneLine.length > 30 ? `${oneLine.slice(0, 30).trim()}…` : oneLine;
   }, [repMemoBody, repMemoTitle, representativeMemo]);
-
-  const repPhotoUri = representativePhoto || '';
-
-  const repPhotoUriNormalized = useMemo(() => normalizeImageUri(repPhotoUri), [repPhotoUri]);
-
-  useEffect(() => {
-    setRepPhotoFailed(false);
-  }, [repPhotoUriNormalized]);
 
   const repEmotionLabel =
     repEmotionId && moodPalette[repEmotionId] ? moodPalette[repEmotionId].label : '';
@@ -317,11 +297,7 @@ export default function CalendarScreen() {
 
   return (
     <NotebookLayout>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.pagePad}
-        showsVerticalScrollIndicator={false}
-      >
+      <View style={styles.root}>
         <View style={styles.titleRow}>
           <Text style={styles.emoji}>📅</Text>
           <Text style={styles.pageTitle}>Mood Calendar</Text>
@@ -471,23 +447,15 @@ export default function CalendarScreen() {
               </View>
 
               {hasRepresentativeMemo ? (
-                <>
-                  {repCardTitle ? <Text style={styles.repCardTitle}>{repCardTitle}</Text> : null}
-                  {repPhotoUriNormalized && !repPhotoFailed ? (
-                    <Image
-                      source={{ uri: repPhotoUriNormalized }}
-                      style={styles.repCardPhoto}
-                      resizeMode="cover"
-                      accessibilityLabel="오늘의 한 줄 사진"
-                      onError={() => {
-                        console.log('IMAGE ERROR:', repPhotoUriNormalized);
-                        setRepPhotoFailed(true);
-                      }}
-                    />
-                  ) : null}
-                </>
+                repCardTitle ? (
+                  <Text style={styles.repCardTitle} numberOfLines={2}>
+                    {repCardTitle}
+                  </Text>
+                ) : null
               ) : repEmotionId ? (
-                <Text style={styles.repCardTitle}>{repEmotionFallbackText}</Text>
+                <Text style={styles.repCardTitle} numberOfLines={2}>
+                  {repEmotionFallbackText}
+                </Text>
               ) : (
                 <Text style={styles.repEmptyText}>오늘의 한 줄을 선택해보세요</Text>
               )}
@@ -550,25 +518,22 @@ export default function CalendarScreen() {
             })}
           </View>
         </Surface>
-      </ScrollView>
+      </View>
     </NotebookLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: {
+  root: {
     flex: 1,
-  },
-  pagePad: {
-    flexGrow: 1,
     paddingHorizontal: 20,
-    paddingBottom: 32,
+    paddingBottom: 12,
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 18,
+    marginBottom: 10,
   },
   emoji: {
     fontSize: 18,
@@ -584,7 +549,9 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     borderColor: notebook.gridLine,
     backgroundColor: 'rgba(255,255,255,0.95)',
-    padding: 18,
+    paddingTop: 12,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
   },
   monthRow: {
     flexDirection: 'row',
@@ -614,13 +581,13 @@ const styles = StyleSheet.create({
   },
   cell: {
     width: '14.2857%',
-    paddingVertical: 3,
+    paddingVertical: 2,
     paddingHorizontal: 2,
     alignItems: 'stretch',
     justifyContent: 'center',
   },
   dayCell: {
-    minHeight: 44,
+    minHeight: 38,
     borderRadius: 10,
     overflow: 'hidden',
     alignItems: 'center',
@@ -651,8 +618,8 @@ const styles = StyleSheet.create({
     color: '#2d3748',
   },
   selectedDetail: {
-    marginTop: 22,
-    paddingTop: 14,
+    marginTop: 12,
+    paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: notebook.gridLine,
   },
@@ -663,7 +630,6 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   previewBarWrap: {
-    flex: 1,
     minWidth: 0,
   },
   previewBarLabel: {
@@ -675,11 +641,12 @@ const styles = StyleSheet.create({
   },
   previewBarRow: {
     flexDirection: 'row',
-    height: 20,
+    height: 18,
     borderRadius: 8,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.08)',
+    marginBottom: 12,
   },
   previewSegment: {
     minWidth: 0,
@@ -692,21 +659,21 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(15, 23, 42, 0.08)',
   },
   calendarSummaryWrap: {
-    marginTop: 14,
+    marginTop: 10,
     marginBottom: 10,
     paddingHorizontal: 4,
   },
   calendarSummaryText: {
     fontSize: 14,
-    lineHeight: 22,
+    lineHeight: 21,
     textAlign: 'center',
     color: notebook.inkMuted,
     fontWeight: '600',
   },
   analysisEntry: {
     alignSelf: 'center',
-    marginTop: 14,
-    marginBottom: 20,
+    marginTop: 10,
+    marginBottom: 12,
     paddingVertical: 8,
     paddingHorizontal: 18,
     borderRadius: 999,
@@ -723,12 +690,12 @@ const styles = StyleSheet.create({
     color: notebook.inkMuted,
   },
   repCardWrap: {
-    marginTop: 18,
+    marginTop: 12,
     borderRadius: 16,
     backgroundColor: '#fff',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: notebook.gridLine,
-    padding: 16,
+    padding: 12,
   },
   repCardHeader: {
     flexDirection: 'row',
@@ -750,13 +717,6 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     fontWeight: '700',
     color: notebook.ink,
-  },
-  repCardPhoto: {
-    width: '100%',
-    aspectRatio: 3 / 4,
-    borderRadius: 12,
-    marginTop: 12,
-    backgroundColor: notebook.gridLine,
   },
   repEmptyText: {
     fontSize: 14,
@@ -831,8 +791,8 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'center',
     gap: 10,
-    marginTop: 14,
-    paddingTop: 12,
+    marginTop: 10,
+    paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: notebook.gridLine,
   },

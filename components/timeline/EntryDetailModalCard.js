@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Image, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Image,
+  Keyboard,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { CloudRain, Flame, Heart, Leaf, Smile, X } from 'lucide-react-native';
@@ -47,7 +56,6 @@ export default function EntryDetailModalCard({
   const [viewPhotoFailed, setViewPhotoFailed] = useState(false);
   const [editPhotoFailed, setEditPhotoFailed] = useState(false);
   const [manageExpanded, setManageExpanded] = useState(false);
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
 
   const split = entry ? splitMemo(entry.memo) : { title: '', content: '' };
   const pal = entry ? moodPalette[entry.emotionId] ?? moodPalette.happy : moodPalette.happy;
@@ -106,19 +114,6 @@ export default function EntryDetailModalCard({
     setManageExpanded(false);
   }, [visible, entry?.id, isDetailEditing]);
 
-  useEffect(() => {
-    if (!visible || !isDetailEditing) {
-      setKeyboardOpen(false);
-      return;
-    }
-    const showSub = Keyboard.addListener('keyboardDidShow', () => setKeyboardOpen(true));
-    const hideSub = Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false));
-    return () => {
-      showSub?.remove?.();
-      hideSub?.remove?.();
-    };
-  }, [visible, isDetailEditing]);
-
   return (
     <CenteredKeyboardFormModal
       visible={visible}
@@ -126,8 +121,9 @@ export default function EntryDetailModalCard({
       onBackdropPress={isDetailEditing ? onCancelEdit : onClose}
       bottomInset={bottomInset}
       backdropColor="rgba(15, 23, 42, 0.35)"
-      maxHeightRatio={keyboardOpen ? 0.62 : 0.8}
+      maxHeightRatio={0.8}
       scrollEnabled={false}
+      keyboardAware={false}
     >
       <View style={styles.card} pointerEvents="auto">
         <Pressable
@@ -351,8 +347,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     backgroundColor: '#fff',
     overflow: 'hidden',
-    flexShrink: 1,
-    maxHeight: '100%',
+    maxHeight: '85%',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
@@ -365,10 +360,10 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   contentScroll: {
-    flex: 1,
+    flexGrow: 0,
   },
   scrollContent: {
-    paddingBottom: 20,
+    paddingBottom: 16,
   },
   closeBtn: {
     position: 'absolute',
